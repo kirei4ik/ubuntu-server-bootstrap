@@ -1,0 +1,251 @@
+# Default variables for backup role
+# Система бэкапов с использованием restic для Ubuntu 22.04
+
+backup:
+  # Включить бэкапы
+  enabled: true
+  
+  # Инструмент бэкапа
+  method: "restic"                                 # restic, borgbackup, simple
+  
+  # Что бэкапировать
+  include:
+    # Директории
+    directories:
+      - "/etc"                                     # Конфигурации системы
+      - "/home/*/.ssh"                             # SSH ключи пользователей
+      - "/root/.ssh"                               # SSH ключи root
+    
+    # Отдельные файлы
+    files:
+      - "/etc/passwd"
+      - "/etc/shadow"
+      - "/etc/group"
+      - "/etc/ssh/sshd_config"
+      - "/etc/fstab"
+      - "/etc/hosts"
+      - "/etc/resolv.conf"
+      - "/etc/hostname"
+      - "/etc/network/interfaces"
+  
+  # Что исключить
+  exclude:
+    patterns:
+      - "*.tmp"
+      - "*.temp"
+      - "*.log"
+      - "*.cache"
+      - "*/.cache/*"
+      - "*/tmp/*"
+      - "/tmp/*"
+      - "/var/tmp/*"
+      - "/var/cache/*"
+      - "*/node_modules/*"
+      - "*/.git/*"
+      - "*/vendor/*"
+      - "*.pyc"
+      - "*/__pycache__/*"
+      - "*/.npm/*"
+      - "*/.composer/*"
+      - "*/.local/share/Trash/*"
+    
+    # Исключить по размеру (файлы больше N MB)
+    max_file_size: "1G"                             # Исключить файлы > 1GB
+  
+  # Restic настройки
+  restic:
+    # Пароль репозитория (из Ansible Vault)
+    password: "{{ vault_restic_password }}"
+    
+    # Локальный репозиторий
+    repository: "/backup/repository"
+    
+    # Версия restic
+    version: "0.16.0"                              # Актуальная версия на 2026
+    
+    # Путь к бинарнику
+    binary_path: "/usr/local/bin/restic"
+    
+    # Настройки производительности
+    performance:
+      compression: "auto"                           # auto, max, off
+      pack_size: "32"                                # Размер пакетов в MB
+      read_concurrency: 2                            # Параллельное чтение
+    
+    # Политика хранения
+    retention:
+      keep_last: 7                                   # Последние N бэкапов
+      keep_daily: 30                                  # Ежедневные за N дней
+      keep_weekly: 12                                # Еженедельные за N недель
+      keep_monthly: 6                                # Ежемесячные за N месяцев
+      keep_yearly: 2                                 # Годовые за N лет
+      keep_within: "1w"                              # Хранить всё за последнюю неделю
+    
+    # Расписание бэкапов
+    schedule:
+      daily: "04:00"                                 # Ежедневно в 4:00
+      weekly: "sun 05:00"                            # По воскресеньям в 5:00
+      monthly: "1 06:00"                             # 1-го числа в 6:00
+      
+    # Теги для бэкапов
+    tags:
+      - "ansible-managed"
+      - "system"
+      - "{{ inventory_hostname }}"
+
+  # Локальное хранилище
+  local_storage:
+    enabled: true
+    path: "/backup"
+    min_free_space: "10G"                            # Минимум свободного места
+    alert_threshold: 80                               # Предупреждение при % заполнения
+    
+    # Монтирование (если хранилище на отдельном диске)
+    mount:
+      enabled: false
+      device: ""
+      filesystem: "ext4"
+      options: "defaults,noatime"
+
+  # Удалённое хранилище (опционально)
+  remote_storage:
+    enabled: false
+    type: "s3"                                       # s3, b2, sftp, rest, rclone
+    
+    # S3 настройки
+    s3:
+      endpoint: "s3.amazonaws.com"
+      bucket: "your-backup-bucket"
+      region: "us-east-1"
+      access_key: "{{ vault_aws_access_key }}"
+      secret_key: "{{ vault_aws_secret_key }}"
+      
+    # Backblaze B2 настройки
+    b2:
+      account_id: "{{ vault_b2_account_id }}"
+      account_key: "{{ vault_b2_account_key }}"
+      bucket: "your-backup-bucket"
+      
+    # SFTP настройки
+    sftp:
+      host: "backup.server.com"
+      port: 22
+      user: "backup"
+      path: "/backups/{{ inventory_hostname }}"
+      key_file: "/root/.ssh/backup_rsa"
+      
+  # Шифрование
+  encryption:
+    enabled: true
+    type: "age"                                      # age, gpg
+    
+    # Age ключ (из Ansible Vault)
+    age:
+      key: "{{ vault_age_key }}"
+      public_key: "{{ vault_age_public_key }}"
+      
+    # GPG (альтернатива)
+    gpg:
+      key_id: "{{ vault_gpg_key_id }}"
+      passphrase: "{{ vault_gpg_passphrase }}"
+
+  # Верификация бэкапов
+  verification:
+    enabled: true
+    # Проверять целостность
+    check_integrity: true
+    # Расписание проверки
+    schedule: "weekly"                               # daily, weekly, monthly
+    # День проверки (если weekly)
+    day: "sun"
+    # Время проверки
+    time: "03:00"
+    # Таймаут проверки
+    timeout: "1h"
+    # Уведомлять при ошибках
+    notify_on_failure: true
+
+  # Восстановление
+  restore:
+    # Директория для восстановления
+    target_dir: "/restore"
+    # Версия по умолчанию (latest или snapshot ID)
+    default_version: "latest"
+    # Перезаписывать существующие файлы
+    overwrite: false
+
+  # Уведомления о бэкапах
+  notifications:
+    # Email
+    email:
+      enabled: false
+      smtp_server: "localhost"
+      smtp_port: 25
+      from: "backup@localhost"
+      to: "{{ vault_admin_email | default('root@localhost') }}"
+      # Отправлять при:
+      on_success: false
+      on_failure: true
+      on_verify_failure: true
+      
+    # Telegram
+    telegram:
+      enabled: false
+      bot_token: "{{ vault_telegram_bot_token }}"
+      chat_id: "{{ vault_telegram_chat_id }}"
+      on_success: false
+      on_failure: true
+      
+    # Slack
+    slack:
+      enabled: false
+      webhook_url: "{{ vault_slack_webhook_url }}"
+      channel: "#backups"
+      username: "backup-bot"
+      on_success: false
+      on_failure: true
+
+  # Логирование
+  logging:
+    enabled: true
+    log_dir: "/var/log/backup"
+    log_retention_days: 30
+    # Логировать каждый файл
+    verbose: false
+
+  # Мониторинг бэкапов
+  monitoring:
+    # Метрики для Prometheus (через textfile collector)
+    prometheus:
+      enabled: true
+      textfile_dir: "/var/lib/node_exporter/textfile_collector"
+      # Метрики
+      metrics:
+        - backup_last_run_timestamp
+        - backup_last_success_timestamp
+        - backup_duration_seconds
+        - backup_size_bytes
+        - backup_files_new
+        - backup_files_changed
+        - backup_files_unmodified
+        - backup_errors_total
+        - backup_verify_success
+        
+  # Проверки перед бэкапом
+  pre_backup_checks:
+    enabled: true
+    checks:
+      - name: "disk_space"
+        enabled: true
+        min_free_percent: 10
+      - name: "load_average"
+        enabled: true
+        max_load: 5.0
+      - name: "required_services"
+        enabled: true
+        services:
+          - "ssh"
+          - "cron"
+      - name: "exclude_running_processes"
+        enabled: false
+        processes: []

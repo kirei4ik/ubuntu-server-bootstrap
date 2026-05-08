@@ -1,0 +1,106 @@
+# Ansible managed - do not edit manually
+# Настройки jail для fail2ban
+
+[DEFAULT]
+# Использовать настройки из fail2ban.local
+
+# Время бана
+bantime = {{ security.fail2ban.ban_time }}
+
+# Время поиска
+findtime = {{ security.fail2ban.find_time }}
+
+# Максимальное количество попыток
+maxretry = {{ security.fail2ban.max_retry }}
+
+# Бэкенд
+backend = {{ security.fail2ban.ssh.backend }}
+
+# Игнорируемые IP
+ignoreip = 127.0.0.1/8 ::1
+
+# Действие
+action = %(action_)s
+
+# ============================================
+# JAIL для SSH
+# ============================================
+[sshd]
+enabled = {{ "true" if security.fail2ban.ssh.enabled else "false" }}
+port = {{ security.fail2ban.ssh.port }}
+filter = {{ security.fail2ban.ssh.filter }}
+logpath = {{ security.fail2ban.ssh.logpath }}
+maxretry = {{ security.fail2ban.ssh.maxretry }}
+bantime = {{ security.fail2ban.ssh.bantime }}
+findtime = {{ security.fail2ban.ssh.findtime }}
+backend = {{ security.fail2ban.ssh.backend }}
+
+# ============================================
+# ДОПОЛНИТЕЛЬНЫЕ JAIL
+# ============================================
+{% if security.fail2ban.extra_jails %}
+{% for jail in security.fail2ban.extra_jails %}
+[{{ jail.name }}]
+enabled = {{ "true" if jail.enabled else "false" }}
+port = {{ jail.port }}
+filter = {{ jail.filter }}
+logpath = {{ jail.logpath }}
+maxretry = {{ jail.maxretry | default(3) }}
+bantime = {{ jail.bantime | default("1h") }}
+findtime = {{ jail.findtime | default("10m") }}
+
+{% endfor %}
+{% endif %}
+
+# ============================================
+# СТАНДАРТНЫЕ JAIL (отключены по умолчанию)
+# ============================================
+
+[nginx-http-auth]
+enabled = false
+port = http,https
+filter = nginx-http-auth
+logpath = /var/log/nginx/error.log
+maxretry = 3
+
+[nginx-badbots]
+enabled = false
+port = http,https
+filter = nginx-badbots
+logpath = /var/log/nginx/access.log
+maxretry = 2
+
+[nginx-noscript]
+enabled = false
+port = http,https
+filter = nginx-noscript
+logpath = /var/log/nginx/access.log
+maxretry = 6
+
+[nginx-botsearch]
+enabled = false
+port = http,https
+filter = nginx-botsearch
+logpath = /var/log/nginx/access.log
+maxretry = 2
+
+[apache-auth]
+enabled = false
+port = http,https
+filter = apache-auth
+logpath = /var/log/apache2/*error.log
+maxretry = 3
+
+[apache-badbots]
+enabled = false
+port = http,https
+filter = apache-badbots
+logpath = /var/log/apache2/*access.log
+maxretry = 2
+
+[roundcube-auth]
+enabled = false
+port = http,https
+filter = roundcube-auth
+logpath = /var/log/roundcube/userlogins
+maxretry = 5

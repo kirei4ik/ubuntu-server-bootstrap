@@ -1,0 +1,227 @@
+# Default variables for security role
+# Безопасность Ubuntu 22.04 - настройки по умолчанию
+
+security:
+  # SSH настройки
+  ssh:
+    # Порт SSH (оставляем стандартный 22)
+    port: 22
+    
+    # Запретить вход под root
+    disable_root: true
+    
+    # Только авторизация по ключам
+    password_auth: false
+    permit_empty_passwords: false
+    
+    # Настройки протокола
+    protocol: 2
+    
+    # Криптография (современные алгоритмы 2026)
+    kex_algorithms: "curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group-exchange-sha256"
+    ciphers: "chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr"
+    macs: "hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,umac-128-etm@openssh.com"
+    
+    # Туннелирование и форвардинг
+    permit_tunnel: false
+    allow_tcp_forwarding: no
+    x11_forwarding: no
+    allow_agent_forwarding: no
+    
+    # Таймауты
+    client_alive_interval: 300
+    client_alive_count_max: 2
+    login_grace_time: 60
+    
+    # Лимиты
+    max_auth_tries: 3
+    max_sessions: 2
+    
+    # Логи
+    log_level: "VERBOSE"
+    
+    # Дополнительные настройки
+    use_pam: yes
+    use_dns: no
+    
+    # Разрешенные пользователи (пусто = все)
+    allow_users: []
+    allow_groups: []
+    
+    # Директория для хост-ключей
+    host_key_dir: "/etc/ssh"
+    
+    # Бэкап конфигурации
+    backup_config: yes
+
+  # Фаервол (UFW)
+  firewall:
+    enabled: true
+    default_incoming: "deny"
+    default_outgoing: "allow"
+    default_routed: "deny"
+    ipv6: true
+    logging: "low"
+    
+    # Правила по умолчанию
+    rules:
+      - port: "{{ security.ssh.port }}"
+        proto: "tcp"
+        comment: "SSH доступ"
+      - port: "80"
+        proto: "tcp"
+        comment: "HTTP"
+      - port: "443"
+        proto: "tcp"
+        comment: "HTTPS"
+      - port: "53"
+        proto: "udp"
+        comment: "DNS"
+    
+    # Дополнительные ограничения
+    rate_limit:
+      enabled: true
+      port: "{{ security.ssh.port }}"
+      proto: "tcp"
+      limit: "6/min"
+
+  # fail2ban
+  fail2ban:
+    enabled: true
+    # Настройки бана
+    ban_time: "1h"
+    find_time: "10m"
+    max_retry: 5
+    # Действия
+    action: "%(action_)s"
+    # Отправка email
+    dest_email: "root@localhost"
+    sender_email: "fail2ban@localhost"
+    mta: "sendmail"
+    
+    # Настройки для ssh
+    ssh:
+      enabled: true
+      port: "{{ security.ssh.port }}"
+      filter: "sshd"
+      logpath: "/var/log/auth.log"
+      maxretry: 3
+      bantime: "1h"
+      findtime: "10m"
+      backend: "systemd"
+    
+    # Дополнительные jail-ы
+    extra_jails: []
+    # Пример:
+    # extra_jails:
+    #   - name: "nginx-http-auth"
+    #     enabled: true
+    #     filter: "nginx-http-auth"
+    #     port: "80,443"
+    #     logpath: "/var/log/nginx/error.log"
+    #     maxretry: 3
+
+  # AppArmor
+  apparmor:
+    enabled: true
+    mode: "enforce"  # enforce, complain, disable
+    # Профили для включения
+    profiles:
+      - "usr.sbin.sshd"
+      - "usr.bin.curl"
+      - "usr.bin.wget"
+      - "usr.sbin.nginx"
+      - "usr.sbin.mysql"
+      - "usr.sbin.postgresql"
+    # Дополнительные профили
+    extra_profiles: []
+    # Настройки
+    parser:
+      cache: true
+      base_includes: "/etc/apparmor.d/abstractions"
+
+  # auditd - система аудита
+  auditd:
+    enabled: true
+    # Настройки демона
+    log_file: "/var/log/audit/audit.log"
+    log_format: "ENRICHED"
+    log_group: "adm"
+    flush: "INCREMENTAL_ASYNC"
+    freq: 50
+    max_log_file: 8
+    num_logs: 5
+    priority_boost: 4
+    name_format: "HOSTNAME"
+    max_log_file_action: "ROTATE"
+    space_left: 75
+    space_left_action: "SYSLOG"
+    admin_space_left: 50
+    admin_space_left_action: "SUSPEND"
+    disk_full_action: "SUSPEND"
+    disk_error_action: "SUSPEND"
+    use_libwrap: true
+    tcp_listen_queue: 5
+    tcp_max_per_addr: 1
+    tcp_client_max_idle: 0
+    enable_krb5: false
+    krb5_principal: "auditd"
+    
+    # Правила аудита
+    rules:
+      # Изменение пользователей
+      - "-w /etc/passwd -p wa -k identity"
+      - "-w /etc/shadow -p wa -k identity"
+      - "-w /etc/group -p wa -k identity"
+      - "-w /etc/gshadow -p wa -k identity"
+      - "-w /etc/sudoers -p wa -k sudoers"
+      - "-w /etc/sudoers.d/ -p wa -k sudoers"
+      
+      # Изменение SSH
+      - "-w /etc/ssh/ -p wa -k ssh"
+      - "-w /etc/ssh/sshd_config -p wa -k ssh"
+      
+      # Модификация системы
+      - "-w /etc/pam.d/ -p wa -k pam"
+      - "-w /etc/security/ -p wa -k pam"
+      
+      # Административный доступ
+      - "-w /root -p wa -k root_access"
+      - "-w /tmp -p x -k tmp_execution"
+      - "-w /var/tmp -p x -k tmp_execution"
+      
+      # Логи аутентификации
+      - "-w /var/log/auth.log -p wa -k authentication"
+      - "-w /var/log/lastlog -p wa -k logins"
+      
+      # Изменение AppArmor
+      - "-w /etc/apparmor/ -p wa -k apparmor"
+      - "-w /etc/apparmor.d/ -p wa -k apparmor"
+      
+      # Системные вызовы
+      - "-a always,exit -F arch=b64 -S setuid -S setgid -S setreuid -S setregid -k privilege_escalation"
+      - "-a always,exit -F arch=b64 -S chmod -S fchmod -S fchmodat -S chown -S fchown -S fchownat -S lchown -k file_permissions"
+      
+      # Мониторинг процессов
+      - "-a always,exit -F arch=b64 -S execve -S execveat -k process_execution"
+      
+      # Фильтрация
+      - "-a never,exclude -F msgtype=USER_AUTH"
+      - "-a never,exclude -F msgtype=CRED_ACQ"
+      
+    # Дополнительные правила
+    extra_rules: []
+
+  # Ограничение core dumps
+  core_dumps:
+    enabled: false
+    soft_limit: 0
+    hard_limit: 0
+    
+  # Защита от SYN flood
+  syn_flood:
+    enabled: true
+    
+  # Информационные сообщения
+  messages:
+    disable_system_info: true

@@ -1,0 +1,49 @@
+# Ansible managed - do not edit manually
+# Глобальные настройки fail2ban
+
+[DEFAULT]
+# Адрес для уведомлений
+destemail = {{ security.fail2ban.dest_email }}
+sender = {{ security.fail2ban.sender_email }}
+
+# MTA для отправки писем
+mta = {{ security.fail2ban.mta }}
+
+# Время бана (в секундах или формате: 600, 1h, 1d)
+bantime = {{ security.fail2ban.ban_time }}
+
+# Время поиска повторных попыток
+findtime = {{ security.fail2ban.find_time }}
+
+# Максимальное количество попыток
+maxretry = {{ security.fail2ban.max_retry }}
+
+# Действие при обнаружении нарушения
+action = {{ security.fail2ban.action }}
+
+# Бэкенд для чтения логов
+backend = systemd
+
+# Игнорировать IP адреса
+ignoreip = 127.0.0.1/8 ::1
+
+# Настройки для отправки уведомлений
+#action_mwl = %(action_)s
+#action_ = %(action_)s
+
+# Логирование
+loglevel = INFO
+logtarget = /var/log/fail2ban.log
+syslogsocket = auto
+socket = /var/run/fail2ban/fail2ban.sock
+pidfile = /var/run/fail2ban/fail2ban.pid
+dbfile = /var/lib/fail2ban/fail2ban.sqlite3
+dbpurgeage = 1d
+
+# Дополнительные настройки
+usedns = warn
+protocol = tcp
+chain = <known/chain>
+
+# Разрешить IPv6
+allowipv6 = auto

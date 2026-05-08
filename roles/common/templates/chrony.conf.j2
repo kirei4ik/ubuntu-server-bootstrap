@@ -1,0 +1,46 @@
+# Ansible managed - do not edit manually
+
+# Используем NTP серверы из переменной
+{% for server in common.chrony.ntp_servers %}
+pool {{ server }} iburst maxsources 4
+{% endfor %}
+
+# Используем оборудование как источник времени (опционально)
+#pool 127.127.1.0
+
+# Допускаем корректировку времени только один раз при старте
+makestep 1 -1
+
+# Включить аппаратные метки времени
+#hwtimestamp *
+
+# Разрешить синхронизацию с локальными часами
+#local stratum 10
+
+# Настройка локальных часов
+{% if common.chrony.local_stratum is defined %}
+local stratum {{ common.chrony.local_stratum }}
+allow 127/8
+allow ::1
+{% endif %}
+
+# Разрешить синхронизацию для указанных сетей
+{% if common.chrony.allowed_networks | length > 0 %}
+{% for network in common.chrony.allowed_networks %}
+allow {{ network }}
+{% endfor %}
+{% else %}
+# Разрешить всем (по умолчанию)
+allow
+{% endif %}
+
+# Другие настройки
+rtcsync
+logdir /var/log/chrony
+maxupdateskew 100.0
+dumponexit
+dumpdir /var/lib/chrony
+
+# Настройки логирования
+logchange 0.5
+log measurements statistics tracking

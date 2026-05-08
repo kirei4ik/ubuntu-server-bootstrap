@@ -1,0 +1,477 @@
+---
+# Задачи для настройки безопасности Ubuntu 22.04
+# ВНИМАНИЕ: Эта роль изменяет SSH и фаервол - проверьте резервный доступ!
+
+- name: Проверить что система Ubuntu 22.04
+  fail:
+    msg: "Эта роль работает только с Ubuntu 22.04 и новее. Текущая версия: {{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }}"
+  when: >
+    ansible_facts.distribution != 'Ubuntu' or
+    ansible_facts.distribution_major_version | int < 22
+
+- name: ====== НАСТРОЙКА SSH ======
+  block:
+    - name: Сделать бэкап текущего sshd_config
+      copy:
+        src: /etc/ssh/sshd_config
+        dest: /etc/ssh/sshd_config.backup.{{ ansible_date_time.date }}_{{ ansible_date_time.time }}
+        remote_src: yes
+        owner: root
+        group: root
+        mode: '0600'
+      when: security.ssh.backup_config
+
+    - name: Настроить SSH - основные параметры
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^{{ item.regexp }}"
+        line: "{{ item.line }}"
+        state: present
+        create: no
+        backup: no
+      with_items:
+        - { regexp: 'Port\s+', line: 'Port {{ security.ssh.port }}' }
+        - { regexp: 'Protocol\s+', line: 'Protocol {{ security.ssh.protocol }}' }
+        - { regexp: 'PermitRootLogin\s+', line: 'PermitRootLogin {{ "no" if security.ssh.disable_root else "yes" }}' }
+        - { regexp: 'PasswordAuthentication\s+', line: 'PasswordAuthentication {{ "yes" if security.ssh.password_auth else "no" }}' }
+        - { regexp: 'PermitEmptyPasswords\s+', line: 'PermitEmptyPasswords {{ "yes" if security.ssh.permit_empty_passwords else "no" }}' }
+        - { regexp: 'ChallengeResponseAuthentication\s+', line: 'ChallengeResponseAuthentication no' }
+        - { regexp: 'UsePAM\s+', line: 'UsePAM {{ "yes" if security.ssh.use_pam else "no" }}' }
+        - { regexp: 'X11Forwarding\s+', line: 'X11Forwarding {{ "yes" if security.ssh.x11_forwarding else "no" }}' }
+        - { regexp: 'AllowTcpForwarding\s+', line: 'AllowTcpForwarding {{ "yes" if security.ssh.allow_tcp_forwarding else "no" }}' }
+        - { regexp: 'PermitTunnel\s+', line: 'PermitTunnel {{ "yes" if security.ssh.permit_tunnel else "no" }}' }
+        - { regexp: 'AllowAgentForwarding\s+', line: 'AllowAgentForwarding {{ "yes" if security.ssh.allow_agent_forwarding else "no" }}' }
+        - { regexp: 'ClientAliveInterval\s+', line: 'ClientAliveInterval {{ security.ssh.client_alive_interval }}' }
+        - { regexp: 'ClientAliveCountMax\s+', line: 'ClientAliveCountMax {{ security.ssh.client_alive_count_max }}' }
+        - { regexp: 'LoginGraceTime\s+', line: 'LoginGraceTime {{ security.ssh.login_grace_time }}' }
+        - { regexp: 'MaxAuthTries\s+', line: 'MaxAuthTries {{ security.ssh.max_auth_tries }}' }
+        - { regexp: 'MaxSessions\s+', line: 'MaxSessions {{ security.ssh.max_sessions }}' }
+        - { regexp: 'LogLevel\s+', line: 'LogLevel {{ security.ssh.log_level }}' }
+        - { regexp: 'UseDNS\s+', line: 'UseDNS {{ "yes" if security.ssh.use_dns else "no" }}' }
+      notify: Restart SSH
+
+    - name: Настроить SSH - криптография
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^{{ item.regexp }}"
+        line: "{{ item.line }}"
+        state: present
+        create: no
+      with_items:
+        - { regexp: 'KexAlgorithms\s+', line: 'KexAlgorithms {{ security.ssh.kex_algorithms }}' }
+        - { regexp: 'Ciphers\s+', line: 'Ciphers {{ security.ssh.ciphers }}' }
+        - { regexp: 'MACs\s+', line: 'MACs {{ security.ssh.macs }}' }
+      notify: Restart SSH
+
+    - name: Настроить SSH - разрешенные пользователи
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^AllowUsers"
+        line: "AllowUsers {{ security.ssh.allow_users | join(' ') }}"
+        state: "{{ 'present' if security.ssh.allow_users | length > 0 else 'absent' }}"
+        create: no
+      notify: Restart SSH
+
+    - name: Настроить SSH - разрешенные группы
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^AllowGroups"
+        line: "AllowGroups {{ security.ssh.allow_groups | join(' ') }}"
+        state: "{{ 'present' if security.ssh.allow_groups | length > 0 else 'absent' }}"
+        create: no
+      notify: Restart SSH
+
+    - name: Настроить SSH - запретить аутентификацию по паролю для root
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?\s*AuthenticationMethods'
+        line: 'AuthenticationMethods publickey'
+        state: present
+        create: no
+      when: not security.ssh.password_auth
+      notify: Restart SSH
+
+    - name: Удалить устаревшие параметры
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "{{ item }}"
+        state: absent
+      with_items:
+        - '^UseLogin'
+        - '^RSAAuthentication'
+        - '^RhostsRSAAuthentication'
+        - '^HostbasedAuthentication'
+        - '^UsePrivilegeSeparation'
+        - '^KeyRegenerationInterval'
+        - '^ServerKeyBits'
+        - '^StrictModes'
+      notify: Restart SSH
+
+    - name: Проверить синтаксис sshd_config
+      command: sshd -t
+      register: sshd_test
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Показать ошибки sshd_config если есть
+      debug:
+        msg: "ОШИБКА в sshd_config: {{ sshd_test.stderr }}"
+      when: sshd_test.rc != 0
+
+    - name: Откатить sshd_config при ошибке
+      copy:
+        src: "/etc/ssh/sshd_config.backup.{{ ansible_date_time.date }}_{{ ansible_date_time.time }}"
+        dest: /etc/ssh/sshd_config
+        remote_src: yes
+        owner: root
+        group: root
+        mode: '0644'
+      when: sshd_test.rc != 0 and security.ssh.backup_config
+
+    - name: Перезапустить SSH
+      systemd:
+        name: ssh
+        state: restarted
+        daemon_reload: yes
+      when: sshd_test.rc == 0
+      tags: [ 'never', 'security_activate' ]  # НЕ перезапускать при подготовке!
+  tags:
+    - ssh
+    - security_prepare  # Меняем тег: только подготовка
+    - security
+
+- name: ====== ВНИМАНИЕ ======
+  debug:
+    msg: |
+      ⚠️  SSH настроен, но НЕ перезапущен!
+      ⚠️  Фаервол настроен, но НЕ включен!
+      Проверьте доступ и запустите security_activate.
+  tags:
+    - security_prepare
+    - info
+
+- name: ====== НАСТРОЙКА ФАЕРВОЛА (UFW) ======
+  block:
+    - name: Установить UFW
+      apt:
+        name: ufw
+        state: present
+
+    - name: Сбросить UFW (начать с чистого листа)
+      ufw:
+        state: reset
+      ignore_errors: yes
+
+    - name: Установить политику по умолчанию
+      ufw:
+        default: "{{ security.firewall.default_incoming }}"
+        direction: incoming
+
+    - name: Установить политику для исходящих
+      ufw:
+        default: "{{ security.firewall.default_outgoing }}"
+        direction: outgoing
+
+    - name: Включить IPv6
+      lineinfile:
+        path: /etc/default/ufw
+        regexp: '^IPV6='
+        line: 'IPV6={{ "yes" if security.firewall.ipv6 else "no" }}'
+        state: present
+        create: no
+      notify: Reload UFW
+
+    - name: Настроить логирование UFW
+      ufw:
+        logging: "{{ security.firewall.logging }}"
+
+    - name: Добавить правила фаервола
+      ufw:
+        rule: allow
+        port: "{{ item.port }}"
+        proto: "{{ item.proto | default('tcp') }}"
+        comment: "{{ item.comment | default('') }}"
+      with_items: "{{ security.firewall.rules }}"
+      notify: Reload UFW
+
+    - name: Настроить rate limiting для SSH
+      ufw:
+        rule: limit
+        port: "{{ security.firewall.rate_limit.port }}"
+        proto: "{{ security.firewall.rate_limit.proto }}"
+      when: security.firewall.rate_limit.enabled
+      notify: Reload UFW
+
+    - name: Запретить подключения к порту 23 (telnet)
+      ufw:
+        rule: deny
+        port: '23'
+        proto: tcp
+      notify: Reload UFW
+
+    - name: Включить UFW
+      ufw:
+        state: enabled
+      ignore_errors: yes
+      tags: [ 'never', 'security_activate' ]
+  tags:
+    - ufw
+    - firewall
+    - security
+
+- name: ====== НАСТРОЙКА FAIL2BAN ======
+  block:
+    - name: Установить fail2ban
+      apt:
+        name: fail2ban
+        state: present
+
+    - name: Создать fail2ban.local
+      template:
+        src: fail2ban.local.j2
+        dest: /etc/fail2ban/fail2ban.local
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart fail2ban
+
+    - name: Создать jail.local
+      template:
+        src: jail.local.j2
+        dest: /etc/fail2ban/jail.local
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart fail2ban
+
+    - name: Создать фильтр для nginx
+      copy:
+        content: |
+          [Definition]
+          failregex = ^<HOST> .* "(GET|POST).*HTTP/[0-9.]+" (404|444|403|400)
+                      ^<HOST> -.*"(GET|POST).*HTTP/[0-9.]+" 444 0 "-" "-"
+          ignoreregex =
+        dest: /etc/fail2ban/filter.d/nginx-http-auth.conf
+        owner: root
+        group: root
+        mode: '0644'
+      when: security.fail2ban.ssh.enabled
+      notify: Restart fail2ban
+
+    - name: Включить и запустить fail2ban
+      systemd:
+        name: fail2ban
+        enabled: yes
+        state: started
+        daemon_reload: yes
+      ignore_errors: yes
+      tags: [ 'never', 'security_activate' ]
+  tags:
+    - fail2ban
+    - security
+
+- name: ====== НАСТРОЙКА APPARMOR ======
+  block:
+    - name: Установить AppArmor и утилиты
+      apt:
+        name:
+          - apparmor
+          - apparmor-utils
+          - apparmor-profiles
+          - apparmor-profiles-extra
+        state: present
+
+    - name: Включить AppArmor в режиме enforce
+      lineinfile:
+        path: /etc/default/grub
+        regexp: '^GRUB_CMDLINE_LINUX_DEFAULT='
+        line: 'GRUB_CMDLINE_LINUX_DEFAULT="apparmor=1 security=apparmor"'
+        state: present
+        create: no
+      notify: Update grub
+
+    - name: Обновить GRUB
+      command: update-grub
+      when: false  # Запускать вручную или через handler
+
+    - name: Включить профили AppArmor
+      command: "aa-enforce /etc/apparmor.d/{{ item }}"
+      with_items: "{{ security.apparmor.profiles }}"
+      ignore_errors: yes
+      when: security.apparmor.mode == 'enforce'
+
+    - name: Включить complain mode
+      command: "aa-complain /etc/apparmor.d/{{ item }}"
+      with_items: "{{ security.apparmor.profiles }}"
+      ignore_errors: yes
+      when: security.apparmor.mode == 'complain'
+
+    - name: Проверить статус AppArmor
+      command: aa-status
+      register: apparmor_status
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Показать статус AppArmor
+      debug:
+        var: apparmor_status.stdout_lines
+      when: apparmor_status.rc == 0
+  tags:
+    - apparmor
+    - security
+
+- name: ====== НАСТРОЙКА AUDITD ======
+  block:
+    - name: Установить auditd
+      apt:
+        name:
+          - auditd
+          - audispd-plugins
+        state: present
+
+    - name: Настроить auditd.conf
+      template:
+        src: auditd.conf.j2
+        dest: /etc/audit/auditd.conf
+        owner: root
+        group: root
+        mode: '0640'
+      notify: Restart auditd
+
+    - name: Создать правила аудита
+      template:
+        src: audit.rules.j2
+        dest: /etc/audit/rules.d/ansible.rules
+        owner: root
+        group: root
+        mode: '0640'
+      notify: Restart auditd
+
+    - name: Удалить стандартные правила если нужно
+      file:
+        path: /etc/audit/rules.d/audit.rules
+        state: absent
+      when: security.auditd.rules | length > 0
+
+    - name: Включить и запустить auditd
+      systemd:
+        name: auditd
+        enabled: yes
+        state: started
+        daemon_reload: yes
+      ignore_errors: yes
+      tags: [ 'never', 'security_activate' ]
+  tags:
+    - auditd
+    - security
+    - audit
+
+- name: ====== ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ БЕЗОПАСНОСТИ ======
+  block:
+    - name: Отключить core dumps
+      lineinfile:
+        path: /etc/security/limits.conf
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+        state: present
+        create: no
+      with_items:
+        - { regexp: '^\*\s+soft\s+core', line: '*          soft    core           0' }
+        - { regexp: '^\*\s+hard\s+core', line: '*          hard    core           0' }
+      when: not security.core_dumps.enabled
+
+    - name: Настроить sysctl для безопасности
+      sysctl:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        sysctl_set: yes
+        state: present
+        reload: yes
+        ignoreerrors: yes
+      with_items:
+        - { name: 'kernel.randomize_va_space', value: '2' }
+        - { name: 'fs.suid_dumpable', value: '0' }
+        - { name: 'kernel.core_uses_pid', value: '1' }
+        - { name: 'kernel.kptr_restrict', value: '2' }
+        - { name: 'kernel.dmesg_restrict', value: '1' }
+        - { name: 'kernel.perf_event_paranoid', value: '2' }
+        - { name: 'kernel.yama.ptrace_scope', value: '1' }
+        - { name: 'net.ipv4.tcp_syncookies', value: '1' }
+        - { name: 'net.ipv4.conf.all.rp_filter', value: '1' }
+        - { name: 'net.ipv4.conf.default.rp_filter', value: '1' }
+        - { name: 'net.ipv4.conf.all.accept_source_route', value: '0' }
+        - { name: 'net.ipv4.conf.default.accept_source_route', value: '0' }
+        - { name: 'net.ipv4.conf.all.accept_redirects', value: '0' }
+        - { name: 'net.ipv4.conf.default.accept_redirects', value: '0' }
+        - { name: 'net.ipv4.conf.all.secure_redirects', value: '0' }
+        - { name: 'net.ipv4.conf.default.secure_redirects', value: '0' }
+        - { name: 'net.ipv4.conf.all.send_redirects', value: '0' }
+        - { name: 'net.ipv4.conf.default.send_redirects', value: '0' }
+        - { name: 'net.ipv4.icmp_echo_ignore_broadcasts', value: '1' }
+        - { name: 'net.ipv4.icmp_ignore_bogus_error_responses', value: '1' }
+        - { name: 'net.ipv4.tcp_timestamps', value: '1' }
+        - { name: 'net.ipv4.tcp_rfc1337', value: '1' }
+        - { name: 'net.ipv6.conf.all.accept_ra', value: '0' }
+        - { name: 'net.ipv6.conf.default.accept_ra', value: '0' }
+        - { name: 'net.ipv6.conf.all.accept_redirects', value: '0' }
+        - { name: 'net.ipv6.conf.default.accept_redirects', value: '0' }
+        - { name: 'fs.protected_hardlinks', value: '1' }
+        - { name: 'fs.protected_symlinks', value: '1' }
+        - { name: 'fs.protected_regular', value: '2' }
+        - { name: 'fs.protected_fifos', value: '2' }
+        - { name: 'dev.tty.ldisc_autoload', value: '0' }
+        - { name: 'kernel.unprivileged_bpf_disabled', value: '1' }
+
+    - name: Отключить системные сообщения о входе
+      file:
+        path: "/etc/update-motd.d/{{ item }}"
+        state: absent
+      with_items:
+        - "10-help-text"
+        - "50-motd-news"
+        - "80-livepatch"
+        - "91-release-upgrade"
+      when: security.messages.disable_system_info
+  tags:
+    - hardening
+    - security
+    - sysctl
+
+- name: ====== ПРОВЕРКА БЕЗОПАСНОСТИ ======
+  block:
+    - name: Проверить статус UFW
+      command: ufw status verbose
+      register: ufw_status
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Показать статус UFW
+      debug:
+        msg: "UFW статус:\n{{ ufw_status.stdout }}"
+      when: ufw_status.rc == 0
+
+    - name: Проверить статус fail2ban
+      command: fail2ban-client status
+      register: fail2ban_status
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Показать статус fail2ban
+      debug:
+        msg: "Fail2ban статус:\n{{ fail2ban_status.stdout }}"
+      when: fail2ban_status.rc == 0
+
+    - name: Проверить SSH настройки
+      command: sshd -T
+      register: sshd_config_check
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Показать ключевые SSH параметры
+      debug:
+        msg: "SSH параметры:\n{{ sshd_config_check.stdout | regex_search('(port|permitrootlogin|passwordauthentication|x11forwarding|allowtcpforwarding).*', multiline=True) }}"
+      when: sshd_config_check.rc == 0
+  tags:
+    - verify
+    - security
+    - check

@@ -1,0 +1,255 @@
+---
+# Задачи для настройки мониторинга Ubuntu 22.04
+
+- name: Проверить что система Ubuntu 22.04
+  fail:
+    msg: "Эта роль работает только с Ubuntu 22.04 и новее. Текущая версия: {{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }}"
+  when: >
+    ansible_facts.distribution != 'Ubuntu' or
+    ansible_facts.distribution_major_version | int < 22
+
+- name: ====== УСТАНОВКА ДОПОЛНИТЕЛЬНЫХ ИНСТРУМЕНТОВ ======
+  block:
+    - name: Установить базовые инструменты мониторинга
+      apt:
+        name:
+          - htop
+          - ncdu
+          - lnav
+        state: present
+      when: monitoring.additional_tools.htop.install | default(true) or monitoring.additional_tools.ncdu.install | default(true)
+
+    - name: Установить smartmontools
+      apt:
+        name: smartmontools
+        state: present
+      when: monitoring.additional_tools.smartmontools.install | default(false)
+
+    - name: Установить сетевые инструменты
+      apt:
+        name:
+          - iftop
+          - nethogs
+          - iotop
+          - nload
+        state: present
+      when: 
+        (monitoring.additional_tools.iftop.install | default(false)) or
+        (monitoring.additional_tools.nethogs.install | default(false)) or
+        (monitoring.additional_tools.iotop.install | default(false)) or
+        (monitoring.additional_tools.nload.install | default(false))
+  tags:
+    - packages
+    - monitoring
+
+- name: ====== УСТАНОВКА NODE_EXPORTER ======
+  block:
+    - name: Создать пользователя для node_exporter
+      user:
+        name: "{{ monitoring.node_exporter.user }}"
+        system: yes
+        shell: "/usr/sbin/nologin"
+        home: "/nonexistent"
+        create_home: no
+
+    - name: Создать директории для node_exporter
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ monitoring.node_exporter.user }}"
+        group: "{{ monitoring.node_exporter.group }}"
+        mode: '0755'
+      with_items:
+        - "{{ monitoring.node_exporter.install_dir }}"
+        - "{{ monitoring.node_exporter.data_dir }}"
+        - "{{ monitoring.node_exporter.textfile_dir }}"
+
+    - name: Скачать node_exporter
+      get_url:
+        url: "https://github.com/prometheus/node_exporter/releases/download/v{{ monitoring.node_exporter.version }}/node_exporter-{{ monitoring.node_exporter.version }}.linux-amd64.tar.gz"
+        dest: "/tmp/node_exporter-{{ monitoring.node_exporter.version }}.linux-amd64.tar.gz"
+        mode: '0644'
+      register: download_result
+      until: download_result is success
+      retries: 3
+      delay: 5
+
+    - name: Распаковать node_exporter
+      unarchive:
+        src: "/tmp/node_exporter-{{ monitoring.node_exporter.version }}.linux-amd64.tar.gz"
+        dest: "/tmp"
+        remote_src: yes
+        creates: "/tmp/node_exporter-{{ monitoring.node_exporter.version }}.linux-amd64/node_exporter"
+
+    - name: Установить node_exporter
+      copy:
+        src: "/tmp/node_exporter-{{ monitoring.node_exporter.version }}.linux-amd64/node_exporter"
+        dest: "{{ monitoring.node_exporter.install_dir }}/node_exporter"
+        owner: "{{ monitoring.node_exporter.user }}"
+        group: "{{ monitoring.node_exporter.group }}"
+        mode: '0755'
+        remote_src: yes
+      notify: Restart node_exporter
+
+    - name: Очистить временные файлы
+      file:
+        path: "{{ item }}"
+        state: absent
+      with_items:
+        - "/tmp/node_exporter-{{ monitoring.node_exporter.version }}.linux-amd64.tar.gz"
+        - "/tmp/node_exporter-{{ monitoring.node_exporter.version }}.linux-amd64"
+
+    - name: Создать systemd unit для node_exporter
+      template:
+        src: node_exporter.service.j2
+        dest: /etc/systemd/system/node_exporter.service
+        owner: root
+        group: root
+        mode: '0644'
+      notify:
+        - Reload systemd
+        - Restart node_exporter
+
+    - name: Включить и запустить node_exporter
+      systemd:
+        name: node_exporter
+        enabled: yes
+        state: started
+        daemon_reload: yes
+
+    - name: Проверить статус node_exporter
+      command: systemctl status node_exporter --no-pager
+      register: node_exporter_status
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Показать статус node_exporter
+      debug:
+        msg: "Node_exporter работает на порту {{ monitoring.node_exporter.port }}"
+      when: node_exporter_status.rc == 0
+  when: monitoring.node_exporter.enabled | default(true)
+  tags:
+    - node_exporter
+    - monitoring
+    - prometheus
+
+- name: ====== НАСТРОЙКА HEALTH CHECKS ======
+  block:
+    - name: Создать скрипт health-check
+      template:
+        src: health-check.sh.j2
+        dest: "{{ monitoring.health_checks.script_path }}"
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Добавить cron для health-checks
+      cron:
+        name: "Системные health checks"
+        minute: "*/{{ monitoring.health_checks.check_interval | default(15) }}"
+        job: "{{ monitoring.health_checks.script_path }} > /dev/null 2>&1"
+        user: root
+        state: present
+      when: monitoring.health_checks.enabled | default(true)
+
+    - name: Создать директорию для логов мониторинга
+      file:
+        path: "{{ monitoring.logging.log_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      when: monitoring.logging.enabled | default(true)
+  tags:
+    - health_checks
+    - monitoring
+
+- name: ====== НАСТРОЙКА NETDATA (ОПЦИОНАЛЬНО) ======
+  block:
+    - name: Установить Netdata
+      apt:
+        name: netdata
+        state: present
+
+    - name: Настроить Netdata
+      template:
+        src: netdata.conf.j2
+        dest: /etc/netdata/netdata.conf
+        owner: netdata
+        group: netdata
+        mode: '0644'
+      notify: Restart netdata
+
+    - name: Включить и запустить Netdata
+      systemd:
+        name: netdata
+        enabled: yes
+        state: started
+        daemon_reload: yes
+  when: monitoring.netdata.enabled | default(false)
+  tags:
+    - netdata
+    - monitoring
+
+- name: ====== НАСТРОЙКА SMARTMONTOOLS ======
+  block:
+    - name: Установить smartmontools
+      apt:
+        name: smartmontools
+        state: present
+
+    - name: Включить smartd
+      systemd:
+        name: smartd
+        enabled: yes
+        state: started
+        daemon_reload: yes
+
+    - name: Настроить smartd
+      lineinfile:
+        path: /etc/default/smartmontools
+        regexp: '^start_smartd='
+        line: 'start_smartd=yes'
+        state: present
+        create: no
+  when: monitoring.additional_tools.smartmontools.install | default(false)
+  tags:
+    - smartmontools
+    - monitoring
+    - disk
+
+- name: ====== ПРОВЕРКА МОНИТОРИНГА ======
+  block:
+    - name: Проверить доступность node_exporter
+      uri:
+        url: "http://localhost:{{ monitoring.node_exporter.port }}/metrics"
+        method: GET
+        status_code: 200
+      register: node_exporter_check
+      ignore_errors: yes
+      when: monitoring.node_exporter.enabled | default(true)
+
+    - name: Показать результат проверки node_exporter
+      debug:
+        msg: "Node_exporter доступен: {{ node_exporter_check.status | default('недоступен') }}"
+      when: monitoring.node_exporter.enabled | default(true)
+
+    - name: Показать список метрик
+      command: "curl -s http://localhost:{{ monitoring.node_exporter.port }}/metrics | head -20"
+      register: metrics_list
+      changed_when: false
+      ignore_errors: yes
+      when: 
+        - monitoring.node_exporter.enabled | default(true)
+        - node_exporter_check.status | default(0) == 200
+
+    - name: Показать примеры метрик
+      debug:
+        var: metrics_list.stdout_lines
+      when: 
+        - monitoring.node_exporter.enabled | default(true)
+        - metrics_list.rc | default(1) == 0
+  tags:
+    - verify
+    - monitoring
+    - check

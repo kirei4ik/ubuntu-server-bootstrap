@@ -1,0 +1,313 @@
+---
+# Задачи для настройки бэкапов с использованием restic
+
+- name: Проверить что система Ubuntu 22.04
+  fail:
+    msg: "Эта роль работает только с Ubuntu 22.04 и новее. Текущая версия: {{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }}"
+  when: >
+    ansible_facts.distribution != 'Ubuntu' or
+    ansible_facts.distribution_major_version | int < 22
+
+- name: ====== УСТАНОВКА RESTIC ======
+  block:
+    - name: Установить restic из репозитория
+      apt:
+        name: restic
+        state: present
+      when: backup.restic.version == "latest"
+
+    - name: Скачать restic бинарник
+      get_url:
+        url: "https://github.com/restic/restic/releases/download/v{{ backup.restic.version }}/restic_{{ backup.restic.version }}_linux_amd64.bz2"
+        dest: "/tmp/restic.bz2"
+        mode: '0644'
+      when: backup.restic.version != "latest"
+      register: download_result
+      until: download_result is success
+      retries: 3
+      delay: 5
+
+    - name: Распаковать restic
+      shell: |
+        bunzip2 -c /tmp/restic.bz2 > {{ backup.restic.binary_path }}
+        chmod +x {{ backup.restic.binary_path }}
+      args:
+        creates: "{{ backup.restic.binary_path }}"
+      when: backup.restic.version != "latest"
+
+    - name: Очистить временные файлы
+      file:
+        path: "/tmp/restic.bz2"
+        state: absent
+      when: backup.restic.version != "latest"
+
+    - name: Проверить версию restic
+      command: "{{ backup.restic.binary_path }} version"
+      register: restic_version
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Показать версию restic
+      debug:
+        msg: "Restic версия: {{ restic_version.stdout }}"
+      when: restic_version.rc == 0
+  tags:
+    - restic
+    - backup
+
+- name: ====== УСТАНОВКА AGE (ШИФРОВАНИЕ) ======
+  block:
+    - name: Установить age
+      apt:
+        name: age
+        state: present
+
+    - name: Создать директорию для ключей
+      file:
+        path: "/etc/backup/keys"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Сохранить age ключ
+      copy:
+        content: "{{ backup.encryption.age.key }}"
+        dest: "/etc/backup/keys/age.key"
+        owner: root
+        group: root
+        mode: '0400'
+      when: backup.encryption.type == "age" and backup.encryption.age.key is defined
+      no_log: true
+  when: backup.encryption.enabled | default(true)
+  tags:
+    - encryption
+    - age
+    - backup
+
+- name: ====== СОЗДАНИЕ ЛОКАЛЬНОГО ХРАНИЛИЩА ======
+  block:
+    - name: Создать директорию для бэкапов
+      file:
+        path: "{{ backup.local_storage.path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Создать директорию для репозитория
+      file:
+        path: "{{ backup.restic.repository }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Создать директорию для логов
+      file:
+        path: "{{ backup.logging.log_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Создать директорию для мониторинга
+      file:
+        path: "/var/lib/node_exporter/textfile_collector"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+  tags:
+    - storage
+    - backup
+
+- name: ====== ИНИЦИАЛИЗАЦИЯ РЕПОЗИТОРИЯ ======
+  block:
+    - name: Проверить существование репозитория
+      command: "{{ backup.restic.binary_path }} snapshots --repo {{ backup.restic.repository }}"
+      environment:
+        RESTIC_PASSWORD: "{{ backup.restic.password }}"
+      register: repo_check
+      changed_when: false
+      ignore_errors: yes
+      no_log: true
+
+    - name: Инициализировать репозиторий
+      command: "{{ backup.restic.binary_path }} init --repo {{ backup.restic.repository }}"
+      environment:
+        RESTIC_PASSWORD: "{{ backup.restic.password }}"
+      when: repo_check.rc != 0
+      no_log: true
+
+    - name: Настроить restic password file
+      copy:
+        content: "{{ backup.restic.password }}"
+        dest: "/etc/backup/restic-password"
+        owner: root
+        group: root
+        mode: '0400'
+      no_log: true
+  tags:
+    - repository
+    - backup
+
+- name: ====== СОЗДАНИЕ СКРИПТОВ БЭКАПА ======
+  block:
+    - name: Создать скрипт для бэкапа
+      template:
+        src: backup.sh.j2
+        dest: "/usr/local/sbin/backup.sh"
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Создать скрипт для восстановления
+      template:
+        src: restore.sh.j2
+        dest: "/usr/local/sbin/restore.sh"
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Создать скрипт для проверки бэкапов
+      template:
+        src: verify-backup.sh.j2
+        dest: "/usr/local/sbin/verify-backup.sh"
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Создать скрипт для удаления старых бэкапов
+      template:
+        src: forget-backup.sh.j2
+        dest: "/usr/local/sbin/forget-backup.sh"
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Создать скрипт для уведомлений
+      template:
+        src: notify-backup.sh.j2
+        dest: "/usr/local/sbin/notify-backup.sh"
+        owner: root
+        group: root
+        mode: '0700'
+  tags:
+    - scripts
+    - backup
+
+- name: ====== SYSTEMD TIMER И SERVICE ======
+  block:
+    - name: Создать systemd service для бэкапа
+      template:
+        src: restic-backup.service.j2
+        dest: /etc/systemd/system/restic-backup.service
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Создать systemd timer для ежедневного бэкапа
+      template:
+        src: restic-backup.timer.j2
+        dest: /etc/systemd/system/restic-backup.timer
+        owner: root
+        group: root
+        mode: '0644'
+      notify:
+        - Reload systemd
+        - Restart backup timer
+
+    - name: Создать systemd service для проверки бэкапов
+      template:
+        src: restic-verify.service.j2
+        dest: /etc/systemd/system/restic-verify.service
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Создать systemd timer для проверки бэкапов
+      template:
+        src: restic-verify.timer.j2
+        dest: /etc/systemd/system/restic-verify.timer
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Перезагрузить systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: Включить и запустить таймер бэкапов
+      systemd:
+        name: restic-backup.timer
+        enabled: yes
+        state: started
+
+    - name: Включить таймер проверки
+      systemd:
+        name: restic-verify.timer
+        enabled: yes
+        state: started
+  tags:
+    - systemd
+    - timer
+    - backup
+
+- name: ====== CRON ДЛЯ ДОПОЛНИТЕЛЬНЫХ ЗАДАЧ ======
+  block:
+    - name: Добавить cron для еженедельной очистки
+      cron:
+        name: "Очистка старых бэкапов"
+        minute: "0"
+        hour: "2"
+        weekday: "0"
+        job: "/usr/local/sbin/forget-backup.sh > /dev/null 2>&1"
+        user: root
+        state: present
+  tags:
+    - cron
+    - backup
+
+- name: ====== ПРОВЕРКА БЭКАПОВ ======
+  block:
+    - name: Проверить список снимков
+      command: "{{ backup.restic.binary_path }} snapshots --repo {{ backup.restic.repository }} --json"
+      environment:
+        RESTIC_PASSWORD: "{{ backup.restic.password }}"
+      register: snapshots
+      changed_when: false
+      ignore_errors: yes
+      no_log: true
+
+    - name: Показать статус репозитория
+      debug:
+        msg: "Репозиторий бэкапов инициализирован успешно"
+      when: snapshots.rc == 0
+
+    - name: Протестировать создание бэкапа
+      command: "/usr/local/sbin/backup.sh"
+      register: test_backup
+      changed_when: true
+      ignore_errors: yes
+      when: backup.enabled | default(true)
+
+    - name: Показать результат тестового бэкапа
+      debug:
+        var: test_backup.stdout_lines
+      when: 
+        - test_backup.rc is defined
+        - test_backup.rc == 0
+
+    - name: Создать метрики для Prometheus
+      template:
+        src: backup-metrics.prom.j2
+        dest: "/var/lib/node_exporter/textfile_collector/backup.prom"
+        owner: root
+        group: root
+        mode: '0644'
+      when: backup.monitoring.prometheus.enabled | default(true)
+  tags:
+    - verify
+    - backup
+    - check

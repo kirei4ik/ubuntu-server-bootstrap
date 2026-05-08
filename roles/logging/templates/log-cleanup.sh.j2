@@ -1,0 +1,90 @@
+#!/bin/bash
+# Ansible managed - do not edit manually
+# Скрипт для очистки старых логов
+
+# Настройки
+MAX_AGE={{ logging.log_cleanup.max_age_days | default(30) }}
+LOG_DIRS=(
+{% for dir in logging.log_cleanup.directories %}
+    "{{ dir }}"
+{% endfor %}
+)
+
+# Паттерны для удаления
+PATTERNS=(
+{% for pattern in logging.log_cleanup.patterns %}
+    "{{ pattern }}"
+{% endfor %}
+)
+
+# Исключения
+EXCLUDES=(
+{% for exclude in logging.log_cleanup.exclude %}
+    "{{ exclude }}"
+{% endfor %}
+)
+
+# Функция проверки исключений
+is_excluded() {
+    local file="$1"
+    for exclude in "${EXCLUDES[@]}"; do
+        if [[ "$file" == $exclude ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Функция очистки
+cleanup_logs() {
+    local dir="$1"
+    local pattern="$2"
+    
+    if [[ ! -d "$dir" ]]; then
+        echo "Директория $dir не существует, пропускаем"
+        return
+    fi
+    
+    find "$dir" -name "$pattern" -type f -mtime +$MAX_AGE -print0 2>/dev/null | while IFS= read -r -d '' file; do
+        if ! is_excluded "$file"; then
+            echo "Удаляем: $file"
+            rm -f "$file"
+        fi
+    done
+}
+
+# Главный цикл
+echo "=== Очистка старых логов ==="
+echo "Дата: $(date)"
+echo "Максимальный возраст: $MAX_AGE дней"
+echo ""
+
+for dir in "${LOG_DIRS[@]}"; do
+    for pattern in "${PATTERNS[@]}"; do
+        cleanup_logs "$dir" "$pattern"
+    done
+done
+
+# Очистка старых архивов journald
+echo ""
+echo "=== Очистка journald ==="
+journalctl --vacuum-time={{ logging.journald.max_retention_sec | default("1month") }} --quiet
+
+# Очистка старых архивов auditd
+echo ""
+echo "=== Очистка auditd ==="
+if [[ -d /var/log/audit ]]; then
+    find /var/log/audit -name "audit.log.*" -type f -mtime +$MAX_AGE -delete 2>/dev/null
+fi
+
+echo ""
+echo "=== Очистка завершена ==="
+
+# Показать текущий размер /var/log
+echo ""
+echo "Текущий размер /var/log:"
+du -sh /var/log 2>/dev/null
+
+echo ""
+echo "Текущий размер journald:"
+journalctl --disk-usage 2>/dev/null

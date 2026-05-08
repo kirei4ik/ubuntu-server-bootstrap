@@ -1,0 +1,42 @@
+---
+# Handlers для роли common
+
+- name: Restart chrony
+  systemd:
+    name: "{{ 'chronyd' if ansible_facts.distribution_major_version | int >= 24 else 'chrony' }}"
+    state: restarted
+    daemon_reload: yes
+  
+- name: Restart unattended-upgrades
+  systemd:
+    name: unattended-upgrades
+    state: restarted
+    daemon_reload: yes
+  
+- name: Apply locale
+  command: locale-gen
+  args:
+    creates: /etc/locale.gen
+  
+- name: Update system hostname
+  command: hostnamectl set-hostname "{{ common.hostname }}"
+  when: common.set_hostname
+  
+- name: Reload system limits
+  command: sysctl -p
+  ignore_errors: yes
+  
+- name: Reboot system
+  reboot:
+    msg: "Reboot required by Ansible"
+    reboot_timeout: 300
+  
+- name: Flush systemd journal
+  systemd:
+    name: systemd-journald
+    state: restarted
+    daemon_reload: yes
+  
+- name: Update motd
+  command: update-motd
+  when: common.motd_enabled

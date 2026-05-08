@@ -1,0 +1,17 @@
+[Unit]
+Description=Prometheus Node Exporter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ monitoring.node_exporter.user }}
+Group={{ monitoring.node_exporter.group }}
+ExecStart={{ monitoring.node_exporter.install_dir }}/node_exporter \
+{% for flag in monitoring.node_exporter.extra_flags | default([]) %}  {{ flag }} \
+{% endfor %}  --web.listen-address={{ monitoring.node_exporter.listen_address }}:{{ monitoring.node_exporter.port }}
+Restart={{ monitoring.node_exporter.systemd.restart | default('always') }}
+RestartSec={{ monitoring.node_exporter.systemd.restart_sec | default('5s') }}
+
+[Install]
+WantedBy=multi-user.target

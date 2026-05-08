@@ -1,0 +1,21 @@
+---
+# Handlers для роли backup
+
+- name: Initialize restic repository
+  command: "{{ backup.restic.binary_path }} init --repo {{ backup.restic.repository }}"
+  environment:
+    RESTIC_PASSWORD: "{{ backup.restic.password }}"
+    RESTIC_REPOSITORY: "{{ backup.restic.repository }}"
+  ignore_errors: yes
+
+- name: Restart backup timer
+  systemd:
+    name: restic-backup.timer
+    state: restarted
+    daemon_reload: yes
+
+- name: Restart backup service
+  systemd:
+    name: restic-backup.service
+    state: restarted
+    daemon_reload: yes

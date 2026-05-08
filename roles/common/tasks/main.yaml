@@ -1,0 +1,368 @@
+---
+# Основные задачи для базовой настройки Ubuntu 22.04
+
+- name: Проверить что система Ubuntu 22.04
+  fail:
+    msg: "Эта роль работает только с Ubuntu 22.04 и новее. Текущая версия: {{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }}"
+  when: >
+    ansible_facts.distribution != 'Ubuntu' or
+    ansible_facts.distribution_major_version | int < 22
+
+- name: Обновить индекс пакетов APT
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+  tags:
+    - packages
+    - apt
+
+- name: Установить базовые пакеты
+  apt:
+    name: "{{ common.base_packages }}"
+    state: present
+    update_cache: no
+  tags:
+    - packages
+    - base
+
+- name: Установить дополнительные пакеты (если заданы)
+  apt:
+    name: "{{ common.extra_packages }}"
+    state: present
+    update_cache: no
+  when: common.extra_packages | default([]) | length > 0
+  tags:
+    - packages
+    - extra
+
+- name: Обновить систему (если включено)
+  apt:
+    upgrade: "{{ 'dist' if (common.upgrade_packages | default(true)) else 'yes' }}"
+    autoremove: "{{ common.autoremove | default(true) }}"
+    autoclean: yes
+  when: common.update_system | default(true)
+  tags:
+    - update
+    - upgrade
+
+- name: Настроить локаль
+  locale_gen:
+    name: "{{ common.locale | default('ru_RU.UTF-8') }}"
+    state: present
+  when: common.locale_gen | default(true)
+  tags:
+    - locale
+    - system
+
+- name: Применить локаль системы
+  block:
+    - name: Установить переменную локали
+      lineinfile:
+        path: /etc/default/locale
+        regexp: '^LC_ALL='
+        line: 'LC_ALL={{ common.locale }}'
+        create: yes
+    
+    - name: Установить языковую переменную
+      lineinfile:
+        path: /etc/default/locale
+        regexp: '^LANG='
+        line: 'LANG={{ common.locale }}'
+        create: yes
+    
+    - name: Обновить локаль системы
+      shell: |
+        update-locale LC_ALL={{ common.locale }}
+        update-locale LANG={{ common.locale }}
+      args:
+        executable: /bin/bash
+  when: common.locale_gen | default(true)
+  tags:
+    - locale
+    - system
+
+- name: Настроить часовой пояс
+  timezone:
+    name: "{{ common.timezone | default('Europe/Moscow') }}"
+  tags:
+    - timezone
+    - system
+
+- name: Установить и настроить chrony (NTP)
+  block:
+    - name: Установить chrony
+      apt:
+        name: chrony
+        state: present
+    
+    - name: Настроить NTP серверы
+      template:
+        src: chrony.conf.j2
+        dest: /etc/chrony/chrony.conf
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart chrony
+    
+    - name: Включить и запустить chrony
+      systemd:
+        name: "{{ common.chrony.service_name }}"
+        enabled: yes
+        state: started
+        daemon_reload: yes
+      ignore_errors: "{{ ansible_check_mode }}"
+      # При --check пакет ещё не установлен, службы нет — это нормально
+  when: common.chrony.enabled | default(true)
+  tags:
+    - chrony
+    - ntp
+    - time
+
+- name: Настроить автоматические обновления безопасности
+  block:
+    - name: Установить unattended-upgrades
+      apt:
+        name: unattended-upgrades
+        state: present
+    
+    - name: Настроить автоматические обновления
+      template:
+        src: 50unattended-upgrades.j2
+        dest: /etc/apt/apt.conf.d/50unattended-upgrades
+        owner: root
+        group: root
+        mode: '0644'
+    
+    - name: Включить автоматические обновления
+      copy:
+        content: |
+          APT::Periodic::Update-Package-Lists "1";
+          APT::Periodic::Download-Upgradeable-Packages "1";
+          APT::Periodic::AutocleanInterval "7";
+          APT::Periodic::Unattended-Upgrade "1";
+        dest: /etc/apt/apt.conf.d/20auto-upgrades
+        owner: root
+        group: root
+        mode: '0644'
+    
+    - name: Перезапустить unattended-upgrades
+      systemd:
+        name: unattended-upgrades
+        enabled: yes
+        state: restarted
+        daemon_reload: yes
+  when: common.unattended_upgrades.enabled | default(true)
+  tags:
+    - updates
+    - security
+    - auto-updates
+
+- name: Создать системных пользователей
+  block:
+    - name: Создать пользователя
+      user:
+        name: "{{ item.name }}"
+        shell: "{{ item.shell | default('/bin/bash') }}"
+        groups: "{{ item.groups | default([]) }}"
+        append: yes
+        create_home: yes
+        system: no
+        password: "{{ item.password | default(omit) }}"
+        update_password: always
+      loop: "{{ common.users | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+    
+    - name: Добавить SSH ключи пользователям
+      authorized_key:
+        user: "{{ item.name }}"
+        state: present
+        key: "{{ item.ssh_key }}"
+        exclusive: yes
+      loop: "{{ common.users | default([]) }}"
+      when: item.ssh_key is defined
+      loop_control:
+        label: "{{ item.name }}"
+  tags:
+    - users
+    - ssh
+    - security
+
+- name: Настроить sudo для пользователей
+  template:
+    src: sudoers.j2
+    dest: "{{ common.sudo.config_file }}"
+    owner: root
+    group: root
+    mode: '0440'
+    validate: 'visudo -cf %s'
+  tags:
+    - sudo
+    - security
+
+- name: Установить hostname
+  hostname:
+    name: "{{ common.hostname | default(inventory_hostname) }}"
+  when: common.set_hostname | default(true)
+  tags:
+    - hostname
+    - system
+
+- name: Настроить файл /etc/hosts
+  blockinfile:
+    path: /etc/hosts
+    marker: "# {mark} ANSIBLE MANAGED BLOCK"
+    block: |
+      {% for entry in common.hosts_entries %}
+      {{ entry }}
+      {% endfor %}
+    create: yes
+  when: common.configure_hosts | default(true)
+  tags:
+    - hosts
+    - network
+
+- name: Настроить Message of the Day (MOTD)
+  copy:
+    content: "{{ common.motd_content }}"
+    dest: /etc/motd
+    owner: root
+    group: root
+    mode: '0644'
+  when: common.motd_enabled | default(true)
+  tags:
+    - motd
+    - login
+
+- name: Настроить Bash
+  block:
+    - name: Добавить настройки в .bashrc
+      lineinfile:
+        path: /etc/skel/.bashrc
+        line: "{{ item }}"
+        create: yes
+      with_items:
+        - "export HISTSIZE={{ common.bash_config.history_size }}"
+        - "export HISTFILESIZE={{ common.bash_config.history_size }}"
+        - "export HISTTIMEFORMAT='%F %T '"
+        - "export HISTCONTROL=ignoreboth"
+        - "shopt -s histappend"
+        - "shopt -s checkwinsize"
+    
+    - name: Настроить цветной prompt
+      lineinfile:
+        path: /etc/skel/.bashrc
+        regexp: '^PS1='
+        line: "PS1='\\[\\033[01;32m\\]\\u@\\h\\[\\033[00m\\]:\\[\\033[01;34m\\]\\w\\[\\033[00m\\]\\$ '"
+        insertafter: EOF
+      when: common.bash_config.colorful_prompt | default(true)
+    
+    - name: Включить автодополнение
+      lineinfile:
+        path: /etc/skel/.bashrc
+        line: 'source /usr/share/bash-completion/bash_completion'
+        insertafter: EOF
+      when: common.bash_config.enable_completion | default(true)
+    
+    - name: Применить настройки к root пользователю
+      copy:
+        src: /etc/skel/.bashrc
+        dest: /root/.bashrc
+        remote_src: yes
+        owner: root
+        group: root
+        mode: '0644'
+  tags:
+    - bash
+    - shell
+
+- name: Настроить Vim
+  block:
+    - name: Создать базовый конфиг Vim
+      copy:
+        content: |
+          " Основные настройки Vim
+          set nocompatible
+          syntax on
+          set number
+          set autoindent
+          set smartindent
+          set tabstop=4
+          set shiftwidth=4
+          set expandtab
+          set showmatch
+          set incsearch
+          set hlsearch
+          set ignorecase
+          set smartcase
+          set cursorline
+          set ruler
+          set showcmd
+          set mouse=a
+          set backspace=indent,eol,start
+          set encoding=utf-8
+          set fileencoding=utf-8
+          set termencoding=utf-8
+          
+          " Цветовая схема
+          colorscheme desert
+          
+          " Настройки для разных типов файлов
+          autocmd FileType yaml setlocal tabstop=2 shiftwidth=2 expandtab
+          autocmd FileType python setlocal tabstop=4 shiftwidth=4 expandtab
+          autocmd FileType javascript setlocal tabstop=2 shiftwidth=2 expandtab
+          autocmd FileType html setlocal tabstop=2 shiftwidth=2 expandtab
+          autocmd FileType css setlocal tabstop=2 shiftwidth=2 expandtab
+        dest: /etc/vim/vimrc.local
+        owner: root
+        group: root
+        mode: '0644'
+  tags:
+    - vim
+    - editor
+
+- name: Очистить систему
+  block:
+    - name: Удалить неиспользуемые пакеты
+      apt:
+        autoremove: yes
+        purge: yes
+      when: common.cleanup.remove_unused_packages | default(true)
+    
+    - name: Очистить кэш APT
+      apt:
+        autoclean: yes
+      when: common.cleanup.clean_apt_cache | default(true)
+    
+    - name: Очистить временные файлы
+      file:
+        path: "{{ item }}"
+        state: absent
+      with_items:
+        - /tmp/*
+        - /var/tmp/*
+      when: common.cleanup.clean_tmp_files | default(true)
+    
+    - name: Удалить старые ядра
+      shell: |
+        dpkg -l | grep ^ii | grep -E 'linux-(image|headers)-[0-9]+' | \
+        grep -v $(uname -r) | awk '{print $2}' | xargs apt-get purge -y
+      args:
+        warn: false
+      register: old_kernels
+      changed_when: old_kernels.stdout != ""
+      when: common.cleanup.remove_old_kernels | default(false)
+  tags:
+    - cleanup
+    - maintenance
+
+- name: Создать флаг необходимости перезагрузки
+  copy:
+    content: "Система требует перезагрузки для применения изменений\n"
+    dest: /var/run/reboot-required
+    owner: root
+    group: root
+    mode: '0644'
+  changed_when: false
+  tags:
+    - reboot

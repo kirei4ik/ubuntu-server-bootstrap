@@ -1,0 +1,65 @@
+# Ansible managed - do not edit manually
+# Настройки sudo для пользователей
+
+# Основные настройки
+Defaults        env_reset
+Defaults        mail_badpass
+Defaults        secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin"
+Defaults        badpass_message="Неправильный пароль! Попробуйте еще раз."
+Defaults        passwd_tries=3
+Defaults        logfile="/var/log/sudo.log"
+Defaults        log_input,log_output
+Defaults        iolog_dir="/var/log/sudo-io"
+# Defaults        requiretty
+Defaults        use_pty
+Defaults        timestamp_timeout=15
+
+# Правила для пользователей
+{% if common.sudo.rules %}
+{% for rule in common.sudo.rules %}
+{{ rule.user }} {{ rule.rule }}
+{% endfor %}
+{% else %}
+# Правила по умолчанию
+root    ALL=(ALL:ALL) ALL
+
+# Члены группы sudo могут выполнять любые команды
+%sudo   ALL=(ALL:ALL) ALL
+
+# Разрешить sudo без пароля для членов группы sudo
+%sudo   ALL=(ALL:ALL) NOPASSWD:ALL
+{% endif %}
+
+# Дополнительные настройки безопасности
+Defaults        lecture=always
+Defaults        lecture_file=/etc/sudoers.lecture
+
+# Отключить использование корневого пароля для sudo
+Defaults        rootpw
+
+# Запретить выполнение опасных команд через sudo
+Cmnd_Alias      DANGEROUS = /bin/su, /usr/bin/su, /bin/bash, /usr/bin/bash
+Defaults!DANGEROUS        !log_output, !log_input
+
+# Разрешить определенные команды без пароля
+Cmnd_Alias      NETWORKING = /sbin/ifconfig, /bin/ip, /sbin/route, /sbin/iptables
+Cmnd_Alias      SOFTWARE = /usr/bin/apt-get, /usr/bin/apt, /usr/bin/dpkg
+Cmnd_Alias      SERVICES = /bin/systemctl, /usr/bin/systemctl, /usr/sbin/service
+Cmnd_Alias      PROCESSES = /bin/nice, /bin/kill, /usr/bin/kill, /usr/bin/killall
+Cmnd_Alias      STORAGE = /bin/mount, /bin/umount, /sbin/mount, /sbin/umount
+
+# Разрешить команды для обслуживания
+%operators ALL=(ALL) NOPASSWD: NETWORKING, SOFTWARE, SERVICES, PROCESSES, STORAGE
+
+# Логирование всех команд sudo
+Defaults        log_host, log_year, logfile="/var/log/sudo.log"
+
+# Включить отдельные директории для каждого пользователя
+Defaults        iolog_dir=/var/log/sudo-io/%{user}
+
+# Сохранение сессии
+Defaults        timestamp_timeout=15
+Defaults        timestampdir=/var/run/sudo
+
+# Инспекция ввода/вывода
+Defaults        log_input, log_output

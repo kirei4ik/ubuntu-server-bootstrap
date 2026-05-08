@@ -1,0 +1,10 @@
+# Ansible managed — не редактировать вручную
+# Сгенерировано автоматически из kernel.sysctl
+
+{% for section, params in (kernel.sysctl | default({})).items() | sort %}
+# ====== {{ section.upper() }} ======
+{% for key, value in params.items() | sort %}
+{{ key }} = {{ value }}
+{% endfor %}
+
+{% endfor %}

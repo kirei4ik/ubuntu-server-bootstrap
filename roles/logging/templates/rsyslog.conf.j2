@@ -1,0 +1,103 @@
+# Ansible managed - do not edit manually
+# Конфигурация rsyslog для Ubuntu 22.04
+
+# Модуль для приёма логов через UDP
+$ModLoad imudp
+$UDPServerRun 514
+
+# Модуль для приёма логов через TCP
+$ModLoad imtcp
+$InputTCPServerRun 514
+
+# Модуль для imjournal (если используется systemd)
+{% if logging.journald.forward_to_syslog | default(false) %}
+$ModLoad imjournal
+$IMJournalStateFile imjournal.state
+{% endif %}
+
+# Формат по умолчанию
+$ActionFileDefaultTemplate RSYSLOG_TraditionalFileFormat
+
+# Формат с высоким разрешением
+$template HighPrecision,"%timestamp:::date-high% %HOSTNAME% %syslogtag%%msg%\n"
+
+# Формат для forward
+$template ForwardFormat,"<%PRI%>%TIMESTAMP:::date-rfc3339% %HOSTNAME% %syslogtag:1:32%%msg:::sp-if-no-1st-sp%%msg%\n"
+
+# Сохранять старые сообщения при перезапуске
+$WorkDirectory /var/spool/rsyslog
+
+# Файл с PID
+$MainMsgQueueFileName mainmsg
+
+# Обработка логов
+$IncludeConfig /etc/rsyslog.d/*.conf
+
+# ============================================
+# ПРАВИЛА ЛОГИРОВАНИЯ
+# ============================================
+
+# Логи ядра
+kern.*                          /var/log/kern.log
+
+# Логи аутентификации
+auth,authpriv.*                 /var/log/auth.log
+
+# Логи почты
+mail.*                          -/var/log/mail.log
+
+# Логи cron
+cron.*                          /var/log/cron.log
+
+# Всё остальное
+*.*;auth,authpriv.none          -/var/log/syslog
+
+# Логи демонов
+daemon.*                        -/var/log/daemon.log
+
+# Логи FTP
+ftp.*                           /var/log/ftp.log
+
+# Логи для отладки
+*.=debug;			        auth,authpriv.none;	news.none;mail.none	-/var/log/debug
+*.=info;*.=notice;*.=warn;	auth,authpriv.none;	cron,daemon.none;	mail,news.none	-/var/log/messages
+
+# ============================================
+# EMERGENCY ЛОГИ
+# ============================================
+*.emerg                         :omusrmsg:*
+
+# ============================================
+# УДАЛЁННОЕ ЛОГИРОВАНИЕ (опционально)
+# ============================================
+{% if logging.rsyslog.enable_remote | default(false) %}
+*.* @{{ logging.rsyslog.remote_server }}:{{ logging.rsyslog.remote_port | default(514) }}
+{% endif %}
+
+# ============================================
+# ОГРАНИЧЕНИЯ ДЛЯ ПРОИЗВОДСТВА
+# ============================================
+# Ограничить размер сообщений
+$MaxMessageSize 64k
+
+# Ограничить размер очереди
+$MainMsgQueueMaxDiskSpace 1g
+$MainMsgQueueHighWatermark 50000
+$MainMsgQueueLowWatermark 25000
+$MainMsgQueueDiscardMark 97500
+$MainMsgQueueDiscardSeverity 5
+
+# Включить дисковый буфер
+$MainMsgQueueType LinkedList
+$MainMsgQueueFileName mainmsg
+
+# ============================================
+# БЕЗОПАСНОСТЬ
+# ============================================
+# Отключить remote commands
+$EscapeControlCharactersOnReceive on
+$DropMsgsWithMaliciousDNSPTRRecords on
+
+# Разрешить только определённые IP (если нужно)
+# $AllowedSender UDP, 127.0.0.1, [::1]
+# $AllowedSender TCP, 127.0.0.1, [::1]

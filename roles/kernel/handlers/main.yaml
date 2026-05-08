@@ -1,0 +1,9 @@
+---
+# Handlers для роли kernel
+
+- name: Reload systemd
+  systemd:
+    daemon_reload: yes
+
+- name: Reload sysctl
+  command: sysctl -p /etc/sysctl.d/99-ansible-kernel.conf

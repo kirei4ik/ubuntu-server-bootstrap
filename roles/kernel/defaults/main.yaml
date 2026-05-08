@@ -1,0 +1,228 @@
+# Default variables for kernel role
+# Оптимизация ядра и системных параметров Ubuntu 22.04
+
+kernel:
+  # Sysctl параметры
+  sysctl:
+    # Сетевые параметры
+    net:
+      # TCP оптимизация
+      net.ipv4.tcp_syncookies: 1                  # Защита от SYN flood
+      net.ipv4.tcp_timestamps: 1                   # Временные метки TCP
+      net.ipv4.tcp_sack: 1                        # Selective ACK
+      net.ipv4.tcp_fack: 1                        # Forward ACK
+      net.ipv4.tcp_window_scaling: 1              # Масштабирование окна
+      net.ipv4.tcp_rfc1337: 1                     # RFC1337 compliance
+      net.ipv4.tcp_tw_reuse: 1                    # Reuse TIME_WAIT sockets
+      net.ipv4.tcp_fin_timeout: 30                # Таймаут FIN_WAIT_2
+      net.ipv4.tcp_keepalive_time: 1200           # Интервал keepalive
+      net.ipv4.tcp_keepalive_probes: 9            # Количество проб
+      net.ipv4.tcp_keepalive_intvl: 75            # Интервал между пробами
+      net.ipv4.tcp_max_syn_backlog: 8192          # Максимум SYN backlog
+      net.ipv4.tcp_max_tw_buckets: 2000000        # Максимум TIME_WAIT sockets
+      net.ipv4.tcp_mem: "50576 64768 98152"       # Память TCP (min pressure max)
+      net.ipv4.tcp_rmem: "4096 87380 16777216"    # Буфер чтения
+      net.ipv4.tcp_wmem: "4096 65536 16777216"    # Буфер записи
+      
+      # Общие сетевые параметры
+      net.core.somaxconn: 65535                   # Максимум backlog
+      net.core.netdev_max_backlog: 65536          # Бэклог сетевого устройства
+      net.core.rmem_max: 16777216                 # Максимум буфера чтения
+      net.core.wmem_max: 16777216                 # Максимум буфера записи
+      net.core.rmem_default: 262144               # Буфер чтения по умолчанию
+      net.core.wmem_default: 262144               # Буфер записи по умолчанию
+      net.core.optmem_max: 655360               # Максимум опциональной памяти
+      
+      # Безопасность сети
+      net.ipv4.ip_forward: 0                      # Отключить IP forwarding
+      net.ipv4.conf.all.rp_filter: 1                # Reverse path filtering
+      net.ipv4.conf.default.rp_filter: 1
+      net.ipv4.conf.all.accept_source_route: 0     # Запрет source routing
+      net.ipv4.conf.default.accept_source_route: 0
+      net.ipv4.conf.all.accept_redirects: 0       # Запрет ICMP redirects
+      net.ipv4.conf.default.accept_redirects: 0
+      net.ipv4.conf.all.secure_redirects: 0       # Запрет secure redirects
+      net.ipv4.conf.default.secure_redirects: 0
+      net.ipv4.conf.all.send_redirects: 0          # Запрет отправки redirects
+      net.ipv4.conf.default.send_redirects: 0
+      net.ipv4.icmp_echo_ignore_broadcasts: 1      # Игнорировать broadcast ping
+      net.ipv4.icmp_ignore_bogus_error_responses: 1
+      
+      # IPv6 безопасность
+      net.ipv6.conf.all.accept_ra: 0              # Запрет Router Advertisement
+      net.ipv6.conf.default.accept_ra: 0
+      net.ipv6.conf.all.accept_redirects: 0
+      net.ipv6.conf.default.accept_redirects: 0
+      
+    # Память
+    vm:
+      vm.swappiness: 10                          # Склонность к swap (0-100)
+      vm.vfs_cache_pressure: 50                  # Давление на кэш VFS
+      vm.dirty_ratio: 40                         # Максимум dirty pages (%)
+      vm.dirty_background_ratio: 10              # Начало фоновой записи (%)
+      vm.dirty_expire_centisecs: 3000            # Время устаревания dirty pages
+      vm.dirty_writeback_centisecs: 500          # Интервал записи на диск
+      vm.overcommit_memory: 0                    # Политика overcommit
+      vm.overcommit_ratio: 50                    # Процент overcommit
+      vm.zone_reclaim_mode: 0                    # Режим zone reclaim
+      vm.min_free_kbytes: 65536                  # Минимум свободной памяти
+      
+    # Файловая система
+    fs:
+      fs.file-max: 2097152                       # Максимум открытых файлов
+      fs.nr_open: 2097152                        # Максимум FD на процесс
+      fs.protected_hardlinks: 1                   # Защита hardlinks
+      fs.protected_symlinks: 1                   # Защита symlinks
+      fs.protected_regular: 2                    # Защита regular files
+      fs.protected_fifos: 2                      # Защита FIFO
+      fs.suid_dumpable: 0                         # Запрет core dumps SUID
+      
+    # Ядро - безопасность
+    kernel:
+      kernel.randomize_va_space: 2               # ASLR (1=консервативный, 2=полный)
+      kernel.kptr_restrict: 2                    # Ограничение указателей ядра
+      kernel.dmesg_restrict: 1                   # Ограничение dmesg
+      kernel.perf_event_paranoid: 2              # Ограничение perf
+      kernel.yama.ptrace_scope: 1                # Ограничение ptrace
+      kernel.core_uses_pid: 1                    # PID в имени core dump
+      kernel.sysrq: 0                             # Отключить SysRq
+      kernel.msgmax: 65536                       # Максимум сообщения
+      kernel.msgmnb: 65536                       # Максимум очереди
+      kernel.unprivileged_bpf_disabled: 1        # Запрет BPF для обычных
+      
+    # Прочее
+    misc:
+      dev.tty.ldisc_autoload: 0                  # Запрет autoload line discipline
+      user.max_user_namespaces: 0                 # Запрет user namespaces (если не нужны)
+      
+  # Ulimits
+  ulimits:
+    # Глобальные настройки
+    global:
+      - domain: "*"
+        type: "soft"
+        item: "nofile"
+        value: "32768"
+      - domain: "*"
+        type: "hard"
+        item: "nofile"
+        value: "65536"
+      - domain: "*"
+        type: "soft"
+        item: "nproc"
+        value: "2048"
+      - domain: "*"
+        type: "hard"
+        item: "nproc"
+        value: "4096"
+      - domain: "*"
+        type: "soft"
+        item: "core"
+        value: "0"
+      - domain: "*"
+        type: "hard"
+        item: "core"
+        value: "0"
+      - domain: "root"
+        type: "soft"
+        item: "nofile"
+        value: "65536"
+      - domain: "root"
+        type: "hard"
+        item: "nofile"
+        value: "1048576"
+        
+    # Настройки для systemd (system.conf)
+    systemd:
+      DefaultLimitNOFILE: 65536
+      DefaultLimitNPROC: 4096
+      DefaultLimitMEMLOCK: "infinity"
+      
+  # SWAP
+  swap:
+    # Управление swap
+    enabled: true
+    swappiness: 10                               # Склонность к swap
+    vfs_cache_pressure: 50                     # Давление на кэш
+    
+    # Создание swap файла (если нет swap раздела)
+    create_swapfile: true
+    swapfile_size: "2G"                          # Размер swap файла
+    swapfile_path: "/swapfile"                   # Путь к swap файлу
+    swapfile_bs: "1M"                            # Block size
+    swapfile_count: "2048"                       # Count (size in MB)
+    
+  # I/O и диски
+  io:
+    # Scheduler для разных типов дисков
+    schedulers:
+      - type: "ssd"                              # NVMe/SSD
+        scheduler: "mq-deadline"                # или none для NVMe
+        disks: "nvme*"
+      - type: "hdd"                              # Жёсткие диски
+        scheduler: "bfq"
+        disks: "sd*"
+      - type: "virtual"                          # Виртуальные диски
+        scheduler: "none"
+        disks: "vd*"
+        
+    # Оптимизация монтирования
+    mount_options:
+      - filesystem: "ext4"
+        options: "noatime,nodiratime,commit=60"
+      - filesystem: "xfs"
+        options: "noatime,nodiratime"
+        
+  # Производительность
+  performance:
+    # Настройки CPU
+    cpu:
+      governor: "performance"                     # performance, ondemand, powersave
+      
+    # Huge pages
+    hugepages:
+      enabled: false
+      size: "2M"                                  # 2M или 1G
+      count: 0                                    # 0 = авто
+      
+    # NUMA (если применимо)
+    numa:
+      enabled: false
+      balancing: false
+      
+    # IRQ affinity (для многопроцессорных систем)
+    irq:
+      enabled: false
+      affinity_policy: "auto"
+      
+  # Модули ядра (черный список)
+  blacklist:
+    modules:
+      - "pcspkr"                                  # System speaker (annoying)
+      - "snd_pcsp"                                # PC speaker sound
+      - "ipv6"                                    # Если IPv6 не используется
+      - "bluetooth"                               # Если Bluetooth не используется
+      - "firewire-core"                           # Firewire (небезопасно)
+      - "thunderbolt"                             # Thunderbolt (DMA атаки)
+      - "usb_storage"                             # Если USB не нужен
+      
+    # Загрузить модули
+    load_modules:
+      - "tcp_bbr"                                 # BBR congestion control
+      
+  # Контрольные группы (cgroups)
+  cgroups:
+    version: 2                                    # cgroup v2
+    enabled: true
+    controllers:
+      - cpu
+      - memory
+      - io
+      - pids
+      
+  # Проверки после настройки
+  verification:
+    run_tests: true
+    check_tcp_buffers: true
+    check_file_limits: true
+    check_memory_settings: true

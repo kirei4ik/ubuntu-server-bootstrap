@@ -1,0 +1,44 @@
+# Ansible managed - do not edit manually
+# Logrotate конфигурация для {{ item.name }}
+
+{{ item.path }} {
+{% if item.frequency is defined %}
+    {{ item.frequency }}
+{% else %}
+    daily
+{% endif %}
+{% if item.rotate is defined %}
+    rotate {{ item.rotate }}
+{% else %}
+    rotate {{ logging.logrotate.rotate | default(7) }}
+{% endif %}
+{% if item.maxsize is defined %}
+    maxsize {{ item.maxsize }}
+{% else %}
+    maxsize {{ logging.logrotate.maxsize | default("100M") }}
+{% endif %}
+{% if logging.logrotate.compress | default(true) %}
+    compress
+{% endif %}
+{% if logging.logrotate.delaycompress | default(false) %}
+    delaycompress
+{% endif %}
+{% if logging.logrotate.missingok | default(true) %}
+    missingok
+{% endif %}
+{% if logging.logrotate.notifempty | default(true) %}
+    notifempty
+{% endif %}
+{% if logging.logrotate.create | default(true) %}
+    create {{ logging.logrotate.create_mode | default("0640") }} {{ logging.logrotate.create_owner | default("syslog") }} {{ logging.logrotate.create_group | default("adm") }}
+{% endif %}
+{% if logging.logrotate.dateext | default(true) %}
+    dateext
+    dateformat {{ logging.logrotate.dateformat | default("-%Y%m%d") }}
+{% endif %}
+{% if item.postrotate is defined %}
+    postrotate
+        {{ item.postrotate }}
+    endscript
+{% endif %}
+}

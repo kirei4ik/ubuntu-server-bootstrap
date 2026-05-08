@@ -1,0 +1,281 @@
+# Default variables for monitoring role
+# Мониторинг системы Ubuntu 22.04
+
+monitoring:
+  # Prometheus node_exporter
+  node_exporter:
+    enabled: true
+    version: "1.6.1"                              # Актуальная версия на 2026
+    
+    # Настройки установки
+    install_method: "binary"                       # binary, package, docker
+    
+    # Пользователь и группа
+    user: "node_exporter"
+    group: "node_exporter"
+    
+    # Порт и адрес
+    port: 9100
+    listen_address: "0.0.0.0"
+    
+    # Директории
+    install_dir: "/opt/node_exporter"
+    config_dir: "/etc/node_exporter"
+    data_dir: "/var/lib/node_exporter"
+    textfile_dir: "/var/lib/node_exporter/textfile_collector"
+    
+    # Коллекторы метрик
+    collectors:
+      enabled:
+        - cpu
+        - meminfo
+        - diskstats
+        - filesystem
+        - loadavg
+        - netdev
+        - stat
+        - time
+        - systemd
+        - filefd
+        - vmstat
+        - hwmon
+        - loadavg
+      
+      disabled:
+        - "arp"
+        - "bonding"
+        - "conntrack"
+        - "entropy"
+        - "mdadm"
+        - "nfs"
+        - "nfsd"
+        - "ntp"
+        - "softnet"
+        - "wifi"
+        - "xfs"
+        - "zfs"
+    
+    # Таймауты
+    timeout: "10s"
+    
+    # TLS (если нужен)
+    tls:
+      enabled: false
+      cert_file: ""
+      key_file: ""
+    
+    # Basic auth (если нужен)
+    basic_auth:
+      enabled: false
+      username: ""
+      password: "{{ vault_node_exporter_password | default('') }}"
+    
+    # Флаги запуска
+    extra_flags:
+      - "--collector.systemd"
+      - "--collector.systemd.enable-restarts-metrics"
+      - "--collector.systemd.enable-start-time-metrics"
+      - "--collector.systemd.enable-task-metrics"
+      - "--path.rootfs=/host"
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+    
+    # Systemd unit настройки
+    systemd:
+      restart: "always"
+      restart_sec: "5s"
+      after:
+        - "network-online.target"
+      wants:
+        - "network-online.target"
+
+  # Netdata (альтернативный мониторинг)
+  netdata:
+    enabled: false
+    version: "latest"
+    port: 19999
+    
+    # Настройки
+    config:
+      history: "3600"                              # Секунды хранения (1 час)
+      memory_mode: "ram"                          # ram, save, map, dbengine
+      page_cache_size: "32"                       # MB
+      dbengine_disk_space: "256"                   # MB
+      
+    # Stream к другому Netdata (если нужно)
+    streaming:
+      enabled: false
+      destination: ""
+      api_key: ""
+
+  # Системные метрики для алертов
+  system_metrics:
+    # Диск
+    disk:
+      warning: 80                                  # Предупреждение при %
+      critical: 90
+      check_interval: 15                           # Минуты
+      filesystems:
+        - "/"
+        - "/var"
+        - "/home"
+        - "/tmp"
+    
+    # Память
+    memory:
+      warning: 85
+      critical: 95
+      check_interval: 5
+    
+    # CPU
+    cpu:
+      warning: 80
+      critical: 95
+      check_interval: 5
+      
+    # Загрузка системы
+    load:
+      warning: 5.0                                 # load average
+      critical: 10.0
+      check_interval: 5
+    
+    # Процессы
+    processes:
+      warning: 500                                 # Количество процессов
+      critical: 1000
+      check_interval: 15
+    
+    # Сеть
+    network:
+      check_interval: 5
+      interfaces:
+        - "eth0"
+        - "ens160"
+        - "ens192"
+
+  # Дополнительные инструменты
+  additional_tools:
+    # htop - интерактивный процесс viewer
+    htop:
+      enabled: true
+      install: true
+    
+    # nload - мониторинг сети
+    nload:
+      enabled: false
+      install: false
+    
+    # iotop - мониторинг I/O
+    iotop:
+      enabled: false
+      install: false
+    
+    # iftop - мониторинг сетевых соединений
+    iftop:
+      enabled: false
+      install: false
+      # Требует root прав
+      needs_root: true
+    
+    # nethogs - мониторинг трафика по процессам
+    nethogs:
+      enabled: false
+      install: false
+      needs_root: true
+    
+    # ncdu - анализ дискового пространства
+    ncdu:
+      enabled: true
+      install: true
+    
+    # ioping - тестирование I/O latency
+    ioping:
+      enabled: false
+      install: false
+    
+    # smartmontools - SMART monitoring
+    smartmontools:
+      enabled: true
+      install: true
+      # Запускать только если есть физические диски
+      only_physical: true
+
+  # Логирование мониторинга
+  logging:
+    enabled: true
+    log_dir: "/var/log/monitoring"
+    log_retention_days: 30
+    
+  # Health checks
+  health_checks:
+    enabled: true
+    script_path: "/usr/local/sbin/health-check.sh"
+    check_interval: 15  # минут
+    
+    # Что проверять
+    checks:
+      - name: "disk_space"
+        enabled: true
+        warning: 80
+        critical: 90
+      - name: "memory"
+        enabled: true
+        warning: 85
+        critical: 95
+      - name: "cpu"
+        enabled: true
+        warning: 80
+        critical: 95
+      - name: "load"
+        enabled: true
+        warning: 5.0
+        critical: 10.0
+      - name: "ssh"
+        enabled: true
+        port: 22
+      - name: "processes"
+        enabled: true
+        warning: 500
+        critical: 1000
+
+  # Уведомления
+  notifications:
+    enabled: false
+    # Email уведомления
+    email:
+      enabled: false
+      smtp_server: "localhost"
+      smtp_port: 25
+      from: "monitoring@localhost"
+      to: "{{ vault_admin_email | default('root@localhost') }}"
+      # Требует настройки postfix/sendmail
+    
+    # Telegram (опционально)
+    telegram:
+      enabled: false
+      bot_token: "{{ vault_telegram_bot_token | default('') }}"
+      chat_id: "{{ vault_telegram_chat_id | default('') }}"
+    
+    # Slack (опционально)
+    slack:
+      enabled: false
+      webhook_url: "{{ vault_slack_webhook_url | default('') }}"
+      channel: "#monitoring"
+      username: "server-monitor"
+    
+    # Discord (опционально)
+    discord:
+      enabled: false
+      webhook_url: "{{ vault_discord_webhook_url | default('') }}"
+      username: "Server Monitor"
+
+  # Prometheus remote write (если есть Prometheus сервер)
+  prometheus_remote:
+    enabled: false
+    url: ""
+    # Базовая аутентификация
+    basic_auth:
+      username: ""
+      password: "{{ vault_prometheus_password | default('') }}"
+    # Bearer token
+    bearer_token: "{{ vault_prometheus_token | default('') }}"

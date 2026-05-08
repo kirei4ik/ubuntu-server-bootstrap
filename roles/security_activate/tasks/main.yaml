@@ -1,0 +1,156 @@
+---
+# Роль АКТИВАЦИИ безопасности
+# Эту роль вызывать ТОЛЬКО после playbook_prepare.yaml и проверки SSH!
+# ⚠️ После этой роли root будет заблокирован
+
+- name: Настроить SSH (перезапуск)
+  block:
+    - name: Перезапустить SSH
+      systemd:
+        name: ssh
+        state: restarted
+        daemon_reload: yes
+    
+    - name: Проверить что SSH запустился
+      wait_for:
+        host: "{{ ansible_host }}"
+        port: "{{ ansible_port | default(22) }}"
+        timeout: 10
+      delegate_to: localhost
+      become: false
+      ignore_errors: yes
+    
+    - name: Проверить синтаксис sshd_config
+      command: sshd -t
+      register: sshd_test
+      changed_when: false
+      ignore_errors: yes
+    
+    - name: Откатить sshd_config при ошибке
+      copy:
+        src: /etc/ssh/sshd_config.backup
+        dest: /etc/ssh/sshd_config
+        remote_src: yes
+        owner: root
+        group: root
+        mode: '0644'
+      when: sshd_test.rc != 0
+      notify: Restart SSH
+  tags:
+    - ssh
+
+- name: Включить AppArmor
+  block:
+    - name: Включить профили AppArmor
+      command: aa-enforce /etc/apparmor.d/
+      ignore_errors: yes
+    
+    - name: Запустить AppArmor
+      systemd:
+        name: apparmor
+        enabled: yes
+        state: started
+        daemon_reload: yes
+      ignore_errors: yes
+  tags:
+    - apparmor
+
+- name: Включить Auditd
+  block:
+    - name: Запустить auditd
+      systemd:
+        name: auditd
+        enabled: yes
+        state: started
+        daemon_reload: yes
+      ignore_errors: yes
+    
+    - name: Удалить стандартные правила auditd
+      file:
+        path: /etc/audit/rules.d/audit.rules
+        state: absent
+      when: security.auditd.rules | length > 0
+      notify: Restart auditd
+  tags:
+    - auditd
+
+- name: Включить UFW (фаервол)
+  block:
+    - name: Запретить дополнительные порты
+      ufw:
+        rule: deny
+        port: '23'
+        proto: tcp
+    
+    - name: Включить UFW
+      ufw:
+        state: enabled
+      ignore_errors: yes
+    
+    - name: Проверить статус UFW
+      command: ufw status verbose
+      register: ufw_status
+      changed_when: false
+      ignore_errors: yes
+    
+    - name: Показать UFW статус
+      debug:
+        msg: "UFW статус:\n{{ ufw_status.stdout }}"
+      when: ufw_status.rc == 0
+  tags:
+    - ufw
+
+- name: Включить fail2ban
+  block:
+    - name: Запустить fail2ban
+      systemd:
+        name: fail2ban
+        enabled: yes
+        state: started
+        daemon_reload: yes
+      ignore_errors: yes
+    
+    - name: Проверить статус fail2ban
+      command: fail2ban-client status
+      register: fail2ban_status
+      changed_when: false
+      ignore_errors: yes
+    
+    - name: Показать fail2ban статус
+      debug:
+        msg: "Fail2ban статус:\n{{ fail2ban_status.stdout }}"
+      when: fail2ban_status.rc == 0
+  tags:
+    - fail2ban
+
+- name: Включить sysctl hardening
+  block:
+    - name: Применить sysctl parameters
+      command: sysctl -p /etc/sysctl.d/99-security.conf
+      ignore_errors: yes
+  tags:
+    - sysctl
+
+- name: Финальные проверки безопасности
+  block:
+    - name: Проверить SSH параметры
+      command: sshd -T
+      register: sshd_check
+      changed_when: false
+      ignore_errors: yes
+    
+    - name: Показать критичные SSH параметры
+      debug:
+        msg: "SSH: {{ sshd_check.stdout | regex_search('(permitrootlogin|passwordauthentication|x11forwarding|allowtcpforwarding).*') }}"
+      when: sshd_check.rc == 0
+    
+    - name: ❗ ПРЕДУПРЕЖДЕНИЕ
+      debug:
+        msg: |
+          ==============================================
+          ⚠️ ОСТОРОЖНО: root заблокирован!
+          Команда проверки:
+          ssh -i ~/.ssh/id_ed25519 bestadmin@{{ inventory_hostname }}
+          ==============================================
+  tags:
+    - check

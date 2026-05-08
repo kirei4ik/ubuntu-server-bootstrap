@@ -1,0 +1,96 @@
+#!/bin/bash
+# Ansible managed - do not edit manually
+# Скрипт мониторинга дискового пространства
+
+# Настройки
+WARNING_THRESHOLD={{ logging.disk_monitoring.warning_threshold | default(80) }}
+CRITICAL_THRESHOLD={{ logging.disk_monitoring.critical_threshold | default(90) }}
+LOG_FILE="/var/log/disk-monitor.log"
+
+# Получить информацию о диске
+check_disk() {
+    local filesystem="$1"
+    local usage=$(df -h "$filesystem" | awk 'NR==2 {print $5}' | sed 's/%//')
+    local size=$(df -h "$filesystem" | awk 'NR==2 {print $2}')
+    local used=$(df -h "$filesystem" | awk 'NR==2 {print $3}')
+    local avail=$(df -h "$filesystem" | awk 'NR==2 {print $4}')
+    
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $filesystem: ${usage}% (использовано ${used} из ${size}, свободно ${avail})" >> "$LOG_FILE"
+    
+    if [[ $usage -ge $CRITICAL_THRESHOLD ]]; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - КРИТИЧЕСКИЙ УРОВЕНЬ: $filesystem заполнен на ${usage}%!" >> "$LOG_FILE"
+        
+        # Отправить уведомление (если настроено)
+        if command -v wall >/dev/null 2>&1; then
+            echo "КРИТИЧЕСКИЙ УРОВЕНЬ: Диск $filesystem заполнен на ${usage}%!" | wall
+        fi
+        
+        # Попытка автоочистки если критично
+        if [[ $usage -ge 95 ]]; then
+            echo "$(date '+%Y-%m-%d %H:%M:%S') - Запуск автоочистки..." >> "$LOG_FILE"
+            /usr/local/sbin/log-cleanup.sh >> "$LOG_FILE" 2>&1
+        fi
+        
+        return 2
+    elif [[ $usage -ge $WARNING_THRESHOLD ]]; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - ПРЕДУПРЕЖДЕНИЕ: $filesystem заполнен на ${usage}%" >> "$LOG_FILE"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Проверка inodes
+check_inodes() {
+    local filesystem="$1"
+    local inode_usage=$(df -i "$filesystem" | awk 'NR==2 {print $5}' | sed 's/%//')
+    
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $filesystem inodes: ${inode_usage}%" >> "$LOG_FILE"
+    
+    if [[ $inode_usage -ge $CRITICAL_THRESHOLD ]]; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - КРИТИЧЕСКИЙ УРОВЕНЬ inodes: $filesystem ${inode_usage}%!" >> "$LOG_FILE"
+        return 2
+    elif [[ $inode_usage -ge $WARNING_THRESHOLD ]]; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - ПРЕДУПРЕЖДЕНИЕ inodes: $filesystem ${inode_usage}%" >> "$LOG_FILE"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Главный цикл
+echo "=== Мониторинг дискового пространства ===" >> "$LOG_FILE"
+echo "Дата: $(date)" >> "$LOG_FILE"
+echo "" >> "$LOG_FILE"
+
+# Проверить основные файловые системы
+filesystems=("/" "/var" "/tmp" "/home" "/backup")
+
+for fs in "${filesystems[@]}"; do
+    if mountpoint -q "$fs" 2>/dev/null; then
+        check_disk "$fs"
+        check_inodes "$fs"
+    fi
+done
+
+# Проверить размер журналов
+echo "" >> "$LOG_FILE"
+echo "Размер journald: $(journalctl --disk-usage 2>/dev/null | head -1)" >> "$LOG_FILE"
+
+# Проверить размер /var/log
+if [[ -d /var/log ]]; then
+    echo "Размер /var/log: $(du -sh /var/log 2>/dev/null | cut -f1)" >> "$LOG_FILE"
+fi
+
+# Проверить размер бэкапов
+if [[ -d /backup ]]; then
+    echo "Размер /backup: $(du -sh /backup 2>/dev/null | cut -f1)" >> "$LOG_FILE"
+fi
+
+echo "" >> "$LOG_FILE"
+echo "=== Проверка завершена ===" >> "$LOG_FILE"
+echo "" >> "$LOG_FILE"
+
+# Ограничить размер лога мониторинга
+tail -n 1000 "$LOG_FILE" > "$LOG_FILE.tmp" 2>/dev/null
+mv "$LOG_FILE.tmp" "$LOG_FILE" 2>/dev/null

@@ -1,0 +1,149 @@
+# Default variables for common role
+# Эти переменные можно переопределить в group_vars или host_vars
+
+common:
+  # Основные пакеты для установки
+  base_packages:
+    - curl
+    - git
+    - htop
+    - vim
+    - tmux
+    - ufw
+    - fail2ban
+    - apparmor
+    - auditd
+    - chrony
+    - logrotate
+    - rsync
+    - restic
+    - software-properties-common
+    - apt-transport-https
+    - ca-certificates
+    - gnupg
+    - lsb-release
+  
+  # Дополнительные пакеты (опционально)
+  extra_packages: []
+  
+  # Настройка локали
+  locale: "ru_RU.UTF-8"
+  locale_gen: true
+  
+  # Часовой пояс
+  timezone: "Europe/Moscow"
+  
+  # Обновление системы
+  update_system: true
+  upgrade_packages: true
+  autoremove: true
+  
+  # Автоматические обновления
+  unattended_upgrades:
+    enabled: true
+    # Тип обновлений: security, all
+    upgrade_type: "security"
+    # Автоматическая перезагрузка
+    automatic_reboot: false
+    automatic_reboot_time: "03:00"
+    # Уведомления по email
+    mail_notifications: false
+    mail_recipient: "root"
+  
+  # Пользователи для создания
+  users: []
+  # Пример:
+  # users:
+  #   - name: "admin"
+  #     ssh_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI..."
+  #     groups: ["sudo"]
+  #     shell: "/bin/bash"
+  #     password: "{{ vault_user_password }}"
+  
+  # Настройка sudo
+  sudo:
+    # Путь к файлу настроек sudoers
+    config_file: "/etc/sudoers.d/ansible_managed"
+    # Правила для пользователей
+    rules:
+      - user: "%sudo"
+        rule: "ALL=(ALL:ALL) NOPASSWD:ALL"
+      - user: "root"
+        rule: "ALL=(ALL:ALL) ALL"
+  
+  # Настройка hostname
+  set_hostname: true
+  hostname: "{{ inventory_hostname }}"
+  
+  # Настройка hosts файла
+  configure_hosts: true
+  hosts_entries:
+    - "127.0.0.1 localhost"
+    - "127.0.1.1 {{ ansible_hostname }} {{ ansible_hostname }}.local"
+    - "::1 ip6-localhost ip6-loopback"
+    - "fe00::0 ip6-localnet"
+    - "ff00::0 ip6-mcastprefix"
+    - "ff02::1 ip6-allnodes"
+    - "ff02::2 ip6-allrouters"
+    - "ff02::3 ip6-allhosts"
+  
+  # Настройка motd (Message of the Day)
+  motd_enabled: true
+  motd_content: |
+    #############################################
+    #         УВАЖАЕМЫЙ ПОЛЬЗОВАТЕЛЬ!          #
+    #############################################
+    
+    ⚠️  Это защищённый сервер Ubuntu 22.04
+    🔐 Доступ разрешён только авторизованным пользователям
+    📊 Мониторинг системы включён
+    💾 Автоматические бэкапы настроены
+    
+    📅 Последний вход: {{ ansible_date_time.date }}
+    ⏰ Текущее время: {{ ansible_date_time.time }}
+    💻 Система: {{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }}
+    
+    ❗ Несанкционированный доступ преследуется по закону
+    #############################################
+  
+  # Настройка Bash
+  bash_config:
+    # Цветной prompt
+    colorful_prompt: true
+    # История команд
+    history_size: 10000
+    history_timestamp: true
+    # Автодополнение
+    enable_completion: true
+  
+  # Настройка Vim
+  vim_config:
+    enable_syntax: true
+    show_line_numbers: true
+    show_ruler: true
+    enable_mouse: true
+  
+  # Очистка системы
+  cleanup:
+    remove_unused_packages: true
+    clean_apt_cache: true
+    clean_tmp_files: true
+    remove_old_kernels: false  # Будьте осторожны!
+  
+  # Настройка NTP (chrony)
+  chrony:
+    enabled: true
+    # Ubuntu 24.04+: служба chronyd, до 24.04: chrony
+    service_name: "{{ 'chronyd' if ansible_facts.distribution_major_version | int >= 24 else 'chrony' }}"
+    ntp_servers:
+      - "pool.ntp.org"
+      - "time.google.com"
+      - "time.cloudflare.com"
+    # Локальные настройки
+    local_stratum: 10
+    # Разрешить только определённые сети
+    allowed_networks: []
+    # Пример:
+    # allowed_networks:
+    #   - "192.168.1.0/24"
+    #   - "10.0.0.0/8"

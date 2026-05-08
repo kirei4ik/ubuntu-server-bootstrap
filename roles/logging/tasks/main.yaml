@@ -1,0 +1,252 @@
+---
+# Задачи для настройки логов Ubuntu 22.04
+
+- name: Проверить что система Ubuntu 22.04
+  fail:
+    msg: "Эта роль работает только с Ubuntu 22.04 и новее. Текущая версия: {{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }}"
+  when: >
+    ansible_facts.distribution != 'Ubuntu' or
+    ansible_facts.distribution_major_version | int < 22
+
+- name: ====== УСТАНОВКА ПАКЕТОВ ======
+  block:
+    - name: Установить logrotate и rsyslog
+      apt:
+        name:
+          - logrotate
+          - rsyslog
+        state: present
+
+    - name: Установить дополнительные утилиты
+      apt:
+        name:
+          - lnav            # Навигатор логов
+          - multitail       # Мультипросмотр логов
+        state: present
+      when: logging.extra_tools | default(false)
+  tags:
+    - packages
+    - logging
+
+- name: ====== НАСТРОЙКА LOGROTATE ======
+  block:
+    - name: Настроить основной конфиг logrotate
+      template:
+        src: logrotate.conf.j2
+        dest: /etc/logrotate.conf
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Создать конфигурации для system logs
+      template:
+        src: logrotate.d.j2
+        dest: "/etc/logrotate.d/{{ item.name }}"
+        owner: root
+        group: root
+        mode: '0644'
+      with_items: "{{ logging.logrotate.system_logs }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Создать дополнительные конфигурации logrotate
+      template:
+        src: logrotate.d.j2
+        dest: "/etc/logrotate.d/{{ item.name }}"
+        owner: root
+        group: root
+        mode: '0644'
+      with_items: "{{ logging.logrotate.extra_configs }}"
+      when: logging.logrotate.extra_configs | length > 0
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Создать systemd timer для logrotate
+      template:
+        src: logrotate.timer.j2
+        dest: /etc/systemd/system/logrotate.timer
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart logrotate
+
+    - name: Включить logrotate timer
+      systemd:
+        name: logrotate.timer
+        enabled: yes
+        state: started
+        daemon_reload: yes
+
+    - name: Протестировать конфигурацию logrotate
+      command: logrotate -d /etc/logrotate.conf
+      register: logrotate_test
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Показать результат теста logrotate
+      debug:
+        msg: "Logrotate тест: {{ logrotate_test.stdout_lines | default([]) | last | default('нет вывода') }}"
+      when: logrotate_test.rc == 0
+  tags:
+    - logrotate
+    - logging
+
+- name: ====== НАСТРОЙКА JOURNALD ======
+  block:
+    - name: Создать директорию для persistent журналов
+      file:
+        path: /var/log/journal
+        state: directory
+        owner: root
+        group: systemd-journal
+        mode: '2755'
+      when: logging.journald.storage == 'persistent'
+
+    - name: Настроить journald.conf
+      template:
+        src: journald.conf.j2
+        dest: /etc/systemd/journald.conf
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart journald
+
+    - name: Перезапустить journald
+      systemd:
+        name: systemd-journald
+        state: restarted
+        daemon_reload: yes
+
+    - name: Очистить старые журналы
+      command: "journalctl --vacuum-size={{ logging.journald.system_max_use }}"
+      ignore_errors: yes
+      changed_when: true
+
+    - name: Проверить размер журналов
+      command: journalctl --disk-usage
+      register: journal_size
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Показать размер журналов
+      debug:
+        var: journal_size.stdout
+      when: journal_size.rc == 0
+  tags:
+    - journald
+    - logging
+
+- name: ====== НАСТРОЙКА RSYSLOG ======
+  block:
+    - name: Установить rsyslog если не установлен
+      apt:
+        name: rsyslog
+        state: present
+
+    - name: Настроить rsyslog.conf
+      template:
+        src: rsyslog.conf.j2
+        dest: /etc/rsyslog.conf
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart rsyslog
+
+    - name: Настроить rsyslog для journald
+      lineinfile:
+        path: /etc/rsyslog.conf
+        regexp: '^\$ModLoad imjournal'
+        line: "$ModLoad imjournal # provides access to the systemd journal"
+        state: present
+        create: no
+      when: logging.journald.forward_to_syslog | default(false)
+      notify: Restart rsyslog
+
+    - name: Включить и запустить rsyslog
+      systemd:
+        name: rsyslog
+        enabled: yes
+        state: started
+        daemon_reload: yes
+  when: logging.rsyslog.enabled
+  tags:
+    - rsyslog
+    - logging
+
+- name: ====== ОЧИСТКА СТАРЫХ ЛОГОВ ======
+  block:
+    - name: Установить cron для очистки старых логов
+      template:
+        src: log-cleanup.sh.j2
+        dest: /usr/local/sbin/log-cleanup.sh
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Добавить cron задачу для очистки логов
+      cron:
+        name: "Очистка старых логов"
+        minute: "0"
+        hour: "3"
+        day: "*"
+        month: "*"
+        weekday: "*"
+        job: "/usr/local/sbin/log-cleanup.sh > /dev/null 2>&1"
+        user: root
+        state: present
+      when: logging.log_cleanup.enabled
+
+    - name: Создать скрипт мониторинга диска
+      template:
+        src: disk-monitor.sh.j2
+        dest: /usr/local/sbin/disk-monitor.sh
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Добавить cron для мониторинга диска
+      cron:
+        name: "Мониторинг дискового пространства"
+        minute: "*/{{ logging.disk_monitoring.check_interval }}"
+        job: "/usr/local/sbin/disk-monitor.sh > /dev/null 2>&1"
+        user: root
+        state: present
+      when: logging.disk_monitoring.enabled | default(true)
+  tags:
+    - cleanup
+    - maintenance
+    - logging
+
+- name: ====== ПРОВЕРКА ЛОГОВ ======
+  block:
+    - name: Проверить размер /var/log
+      command: du -sh /var/log
+      register: varlog_size
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Показать размер /var/log
+      debug:
+        msg: "Размер /var/log: {{ varlog_size.stdout }}"
+      when: varlog_size.rc == 0
+
+    - name: Проверить статус journald
+      command: systemctl status systemd-journald --no-pager
+      register: journald_status
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Проверить конфигурацию logrotate
+      shell: logrotate -d /etc/logrotate.conf 2>&1 | tail -5
+      register: logrotate_check
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Показать статус logrotate
+      debug:
+        msg: "Logrotate конфигурация корректна"
+      when: logrotate_check.rc == 0
+  tags:
+    - verify
+    - logging
+    - check

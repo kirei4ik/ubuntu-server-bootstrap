@@ -1,0 +1,32 @@
+---
+# Handlers для роли logging
+
+- name: Restart rsyslog
+  systemd:
+    name: rsyslog
+    state: restarted
+    daemon_reload: yes
+
+- name: Restart journald
+  systemd:
+    name: systemd-journald
+    state: restarted
+    daemon_reload: yes
+
+- name: Restart logrotate
+  systemd:
+    name: logrotate
+    state: restarted
+    daemon_reload: yes
+
+- name: Run logrotate
+  command: /usr/sbin/logrotate -f /etc/logrotate.conf
+  ignore_errors: yes
+
+- name: Flush journal
+  command: journalctl --flush
+  ignore_errors: yes
+
+- name: Vacuum journal
+  command: "journalctl --vacuum-size={{ logging.journald.system_max_use }}"
+  ignore_errors: yes

@@ -1,0 +1,57 @@
+# Ansible managed - do not edit manually
+# Настройки systemd journald
+# См. journald.conf(5) для деталей.
+
+[Journal]
+# Хранение журналов: persistent (на диске), auto, volatile (в памяти), none
+Storage={{ logging.journald.storage | default("persistent") }}
+
+# Максимальный размер журнала
+SystemMaxUse={{ logging.journald.system_max_use | default("500M") }}
+RuntimeMaxUse={{ logging.journald.runtime_max_use | default("100M") }}
+
+# Максимальный размер отдельного файла
+SystemMaxFileSize={{ logging.journald.system_max_file_size | default("50M") }}
+RuntimeMaxFileSize={{ logging.journald.system_max_file_size | default("50M") }}
+
+# Максимальное время хранения
+MaxRetentionSec={{ logging.journald.max_retention_sec | default("1month") }}
+MaxFileSec={{ logging.journald.max_file_sec | default("1day") }}
+
+# Пересылка в другие системы
+ForwardToSyslog={{ "yes" if logging.journald.forward_to_syslog | default(false) else "no" }}
+ForwardToKMsg={{ "yes" if logging.journald.forward_to_kmsg | default(false) else "no" }}
+ForwardToConsole={{ "yes" if logging.journald.forward_to_console | default(false) else "no" }}
+ForwardToWall={{ "yes" if logging.journald.forward_to_wall | default(true) else "no" }}
+
+# Сжатие и подпись
+Compress={{ "yes" if logging.journald.compress | default(true) else "no" }}
+Seal={{ "yes" if logging.journald.seal | default(true) else "no" }}
+
+# Разделение журналов по пользователям
+SplitMode={{ logging.journald.split_mode | default("uid") }}
+
+# Синхронизация
+SyncIntervalSec={{ logging.journald.sync_interval_sec | default(5) }}
+
+# Rate limiting
+RateLimitInterval={{ logging.journald.rate_limit_interval | default("30s") }}
+RateLimitBurst={{ logging.journald.rate_limit_burst | default(10000) }}
+
+# Не выдавать предупреждения о свободном месте
+SystemKeepFree=
+RuntimeKeepFree=
+
+# Не оставлять место для других пользователей
+SystemMaxFiles=
+RuntimeMaxFiles=
+
+# Приоритеты для разных типов сообщений
+MaxLevelStore=debug
+MaxLevelSyslog=debug
+MaxLevelKMsg=notice
+MaxLevelConsole=info
+MaxLevelWall=emerg
+
+# Включить линейный буфер для консоли
+LineMax=48K

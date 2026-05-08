@@ -1,0 +1,135 @@
+# Ansible managed - do not edit manually
+# Правила аудита системы
+# Формат: -a [list,action|action,list] -S [syscall] -F [filter] -k [key]
+
+# ============================================
+# УДАЛИТЬ ВСЕ СУЩЕСТВУЮЩИЕ ПРАВИЛА
+# ============================================
+-D
+
+# Установить размер буфера
+-b 8192
+
+# Установить лимит на количество правил
+-e 1
+
+# ============================================
+# ИЗМЕНЕНИЕ ПОЛЬЗОВАТЕЛЕЙ И ГРУПП
+# ============================================
+{% for rule in security.auditd.rules %}
+{{ rule }}
+{% endfor %}
+
+# ============================================
+# ДОПОЛНИТЕЛЬНЫЕ ПРАВИЛА
+# ============================================
+{% if security.auditd.extra_rules %}
+{% for rule in security.auditd.extra_rules %}
+{{ rule }}
+{% endfor %}
+{% endif %}
+
+# ============================================
+# БАЗОВЫЕ ПРАВИЛА БЕЗОПАСНОСТИ
+# ============================================
+
+# Мониторинг изменений в /tmp и /var/tmp
+-w /tmp/ -p x -k tmp_execution
+-w /var/tmp/ -p x -k var_tmp_execution
+
+# Мониторинг изменений в критических директориях
+-w /etc/hosts -p wa -k hosts_file
+-w /etc/network/ -p wa -k network_config
+-w /etc/netplan/ -p wa -k netplan_config
+-w /etc/resolv.conf -p wa -k dns_config
+
+# Мониторинг PAM и аутентификации
+-w /etc/pam.d/ -p wa -k pam_changes
+-w /etc/security/ -p wa -k security_changes
+-w /lib/security/ -p wa -k security_library
+
+# Мониторинг cron
+-w /etc/crontab -p wa -k crontab_changes
+-w /etc/cron.d/ -p wa -k cron_d_changes
+-w /etc/cron.daily/ -p wa -k cron_daily
+-w /etc/cron.hourly/ -p wa -k cron_hourly
+-w /etc/cron.weekly/ -p wa -k cron_weekly
+-w /etc/cron.monthly/ -p wa -k cron_monthly
+-w /var/spool/cron/ -p wa -k crontab_user
+
+# Мониторинг systemctl и сервисов
+-w /etc/systemd/ -p wa -k systemd_changes
+-w /lib/systemd/ -p wa -k systemd_lib
+
+# Мониторинг sudo
+-w /usr/bin/sudo -p x -k sudo_execution
+-w /usr/bin/sudoedit -p x -k sudoedit_execution
+-w /etc/sudoers -p wa -k sudoers_changes
+-w /etc/sudoers.d/ -p wa -k sudoers_d_changes
+
+# Мониторинг SSH ключей
+-w /etc/ssh/ -p wa -k ssh_changes
+-w /home/*/.ssh/ -p wa -k ssh_user_keys
+-w /root/.ssh/ -p wa -k ssh_root_keys
+
+# Мониторинг AppArmor
+-w /etc/apparmor/ -p wa -k apparmor_changes
+-w /etc/apparmor.d/ -p wa -k apparmor_profiles
+-w /sbin/apparmor_parser -p x -k apparmor_parser
+
+# Мониторинг UFW
+-w /etc/ufw/ -p wa -k ufw_changes
+-w /usr/sbin/ufw -p x -k ufw_execution
+
+# Мониторинг fail2ban
+-w /etc/fail2ban/ -p wa -k fail2ban_changes
+-w /usr/bin/fail2ban-client -p x -k fail2ban_client
+
+# Мониторинг auditd самого себя
+-w /etc/audit/ -p wa -k audit_config
+-w /sbin/auditctl -p x -k auditctl_execution
+-w /sbin/auditd -p x -k auditd_execution
+
+# Мониторинг изменений в /etc через целую директорию
+-w /etc/ -p wa -k etc_changes
+
+# Мониторинг бинарников системы
+-w /usr/bin/ -p x -k binaries
+-w /usr/sbin/ -p x -k sbinaries
+-w /bin/ -p x -k bin_binaries
+-w /sbin/ -p x -k sbin_binaries
+
+# Мониторинг загрузки модулей ядра
+-w /sbin/insmod -p x -k module_insertion
+-w /sbin/rmmod -p x -k module_removal
+-w /sbin/modprobe -p x -k modprobe_execution
+-a always,exit -F arch=b64 -S init_module -S delete_module -k kernel_modules
+
+# Мониторинг kexec
+-a always,exit -F arch=b64 -S kexec_load -k kexec
+-w /sbin/kexec -p x -k kexec_execution
+
+# Мониторинг изменений в /boot
+-w /boot/ -p wa -k boot_changes
+
+# Мониторинг изменений в /var/log
+-w /var/log/ -p wa -k log_changes
+
+# Мониторинг бэкапов
+-w /backup/ -p wa -k backup_changes
+-w /var/backup/ -p wa -k var_backup_changes
+
+# ============================================
+# ФИЛЬТРЫ (ИСКЛЮЧЕНИЯ)
+# ============================================
+
+# Исключить обычную активность пользователей
+-a never,user -F subj_type=crond_t
+-a never,user -F subj_type=user_t
+
+# Исключить системные процессы
+-a never,exit -F arch=b64 -S sched_yield -S getpid -S getppid -S getpgrp -S setsid
+-a never,exit -F arch=b64 -S futex -S epoll_wait -S poll -S select -S nanosleep -S clock_nanosleep
+
+# Исключить чтение файлов (только запись)
+-a never,exit -F arch=b64 -S read -S readv -S pread64 -S preadv -S recvfrom -S recvmsg

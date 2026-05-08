@@ -1,0 +1,4 @@
+# Ansible managed: /etc/security/limits.conf
+{% for rule in kernel.ulimits.global | default([]) %}
+{{ rule.domain }} {{ rule.type }} {{ rule.item }} {{ rule.value }}
+{% endfor %}

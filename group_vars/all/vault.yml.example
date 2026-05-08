@@ -1,0 +1,60 @@
+# ============================================
+# Ansible Vault - СЕКРЕТНЫЕ ДАННЫЕ
+# ============================================
+# ⚠️  НЕ храните зашифрованные файлы в Git! ⚠️
+#
+# ЭТОТ ФАЙЛ - ПРИМЕР. Скопируйте его и вставьте реальные данные:
+#   cp vault.yml.example vault.yml
+#
+# Затем зашифруйте:
+#   ansible-vault encrypt vault.yml
+#
+# При запуске:
+#   ansible-playbook playbook_prepare.yaml --ask-vault-pass
+#
+# Если нужно изменить:   ansible-vault edit vault.yml
+# Если нужно просмотреть: ansible-vault view vault.yml
+#
+# Ansible сам находит vault.yml в этой папке (group_vars/all/)
+# и подгружает переменные для всех хостов.
+# ============================================
+
+# ====== SSH КЛЮЧИ ======
+# Получить на Mac: cat ~/.ssh/id_ed25519.pub (или id_rsa.pub)
+# Вставьте ВЕСЬ вывод команды (одной строкой)
+vault_admin_ssh_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... ваш@email.com"
+
+# Если нужны дополнительные пользователи:
+# vault_developer_ssh_key: "ssh-rsa AAAAB3NzaC1yc2... developer@company.com"
+# vault_monitoring_ssh_key: "ssh-ed25519 AAA... monitoring@system"
+
+# ====== ПАРОЛИ ======
+# Для restic бэкапов (из Bitwarden или сгенерируйте)
+vault_restic_password: "ваш_сгенерированный_пароль_из_bitwarden"
+
+# Если нужен пользователь с паролем (НЕ рекомендуется):
+# Сначала сгенерируйте хеш пароля на сервере:
+#   mkpasswd --method=SHA-512 ваш_пароль
+# Вставьте результат (начинается с $6$):
+# vault_user_password: "$6$rounds=656000$...хеш..."
+
+# ====== EMAIL ======
+vault_admin_email: "ваш@email.com"
+
+# ====== ОПЦИОНАЛЬНО: УВЕДОМЛЕНИЯ ======
+# Telegram бот для алертов (если нужно)
+# Создать бота: @BotFather в Telegram
+# vault_telegram_bot_token: "1234567890:ABCDEF..."
+# vault_telegram_chat_id: "-1001234567890"
+
+# Slack webhook (если нужно)
+# vault_slack_webhook_url: "https://hooks.slack.com/services/..."
+
+# ====== ОПЦИОНАЛЬНО: ОБЛАЧНЫЕ БЭКАПЫ ======
+# AWS S3 (если используете)
+# vault_aws_access_key: "AKIAIOSFODNN7EXAMPLE"
+# vault_aws_secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+
+# Backblaze B2 (если используете)
+# vault_b2_account_id: "your-account-id"
+# vault_b2_account_key: "your-account-key"

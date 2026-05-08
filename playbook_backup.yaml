@@ -1,0 +1,54 @@
+---
+# Playbook для настройки бэкапов (restic)
+# Можно запускать отдельно после playbook_prepare.yaml + playbook_activate.yaml
+#
+# Запуск:
+#   ansible-playbook playbook_backup.yaml --ask-vault-pass
+#
+# Тестовый запуск:
+#   ansible-playbook playbook_backup.yaml --check --diff --ask-vault-pass
+
+- name: Настройка бэкапов на сервере
+  hosts: all
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Проверить ОС
+      fail:
+        msg: "Требуется Ubuntu 22.04 и новее. Текущая: {{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }}"
+      when: ansible_facts.distribution != 'Ubuntu' or ansible_facts.distribution_major_version | int < 22
+
+    - name: Показать настройки бэкапов
+      debug:
+        msg: |
+          ==============================================
+          💾 НАСТРОЙКА БЭКАПОВ
+
+          Репозиторий: {{ backup.restic.repository }}
+          Локальное хранилище: {{ backup.local_storage.path }}
+          Расписание: {{ backup.restic.schedule.daily }}
+          ==============================================
+
+  roles:
+    - role: backup           # Установка restic, инициализация репозитория
+    - role: backup_activate  # Системд таймеры, скрипты, cron
+
+  post_tasks:
+    - name: Проверка статуса
+      debug:
+        msg: |
+          ==============================================
+          ✅ БЭКАПЫ НАСТРОЕНЫ
+
+          Команды для проверки:
+          sudo systemctl status restic-backup.timer
+          sudo systemctl status restic-verify.timer
+          sudo restic snapshots --repo {{ backup.restic.repository }} --password-file /etc/backup/restic-password
+
+          Ручной бэкап:
+          sudo /usr/local/sbin/backup.sh
+
+          Проверка целостности:
+          sudo /usr/local/sbin/verify-backup.sh
+          ==============================================

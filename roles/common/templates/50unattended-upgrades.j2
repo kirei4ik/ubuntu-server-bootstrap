@@ -1,0 +1,93 @@
+// Ansible managed - do not edit manually
+// Настройки автоматических обновлений Ubuntu
+
+Unattended-Upgrade::Allowed-Origins {
+{% if common.unattended_upgrades.upgrade_type == 'security' %}
+        // Обновления только безопасности
+        "Ubuntu:{{ ansible_distribution_release }}-security";
+{% else %}
+        // Все обновления
+        "Ubuntu:{{ ansible_distribution_release }}-security";
+        "Ubuntu:{{ ansystemdistro_codename }}-updates";
+        "Ubuntu:{{ ansible_distribution_release }}-backports";
+{% endif %}
+};
+
+// Автоматически удалять устаревшие зависимости
+Unattended-Upgrade::AutoFixInterruptedDpkg "true";
+
+// Минимальные шаги для обновления
+Unattended-Upgrade::MinimalSteps "true";
+
+// Разрешить обновление пакетов с новыми зависимостями
+Unattended-Upgrade::InstallOnShutdown "false";
+
+// Отправить email об ошибках обновления
+Unattended-Upgrade::Mail "{{ common.unattended_upgrades.mail_recipient if common.unattended_upgrades.mail_notifications else '' }}";
+
+// Автоматическая перезагрузка
+Unattended-Upgrade::Automatic-Reboot "{{ 'true' if common.unattended_upgrades.automatic_reboot else 'false' }}";
+Unattended-Upgrade::Automatic-Reboot-Time "{{ common.unattended_upgrades.automatic_reboot_time }}";
+
+// Удалить неиспользуемые автоматически установленные пакеты
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+
+// Автоматически удалять ядра, которые больше не нужны
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+
+// Не удалять пакеты в deborphan
+Unattended-Upgrade::Remove-New-Unused-Dependencies "true";
+
+// Разрешить обновление пакетов APT
+Unattended-Upgrade::AllowAPTPeriodic "true";
+
+// Отключить загрузку обновлений при низком заряде батареи
+Unattended-Upgrade::NoUpdateLTSBatteries "false";
+
+// Настройки DPkg
+Unattended-Upgrade::DevRelease "auto";
+
+// Разрешить обновление origin с новой версией
+Acquire::AllowReleaseInfoChange "true";
+
+// Логирование
+Unattended-Upgrade::SyslogEnable "true";
+Unattended-Upgrade::SyslogFacility "daemon";
+Unattended-Upgrade::Verbose "1";
+
+// Настройки для DPkg::Options
+DPkg::Options {
+   "--force-confdef";
+   "--force-confold";
+}
+
+// Настройки для APT::Periodic
+APT::Periodic::Enable "1";
+APT::Periodic::BackupArchiveInterval "0";
+APT::Periodic::BackupLevel "3";
+APT::Periodic::MaxAge "0";
+APT::Periodic::MinAge "2";
+APT::Periodic::MaxSize "0";
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Download-Upgradeable-Packages "1";
+APT::Periodic::AutocleanInterval "1";
+APT::Periodic::Unattended-Upgrade "1";
+
+// Сигналы для перезагрузки
+Unattended-Upgrade::SignalReboot "1";
+
+// Blacklist пакетов для автоматического обновления
+Unattended-Upgrade::Package-Blacklist {
+// Пример:
+//    "vim";
+//    "libc6";
+//    "libc6-dev";
+//    "libc6-i686";
+};
+
+// Whitelist пакетов для автоматического обновления
+Unattended-Upgrade::Package-Whitelist {
+// Пример:
+//    "nginx";
+//    "docker-ce";
+};

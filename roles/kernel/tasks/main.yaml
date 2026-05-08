@@ -1,0 +1,165 @@
+---
+# Задачи для оптимизации ядра и системных параметров Ubuntu
+
+- name: Проверить ОС
+  fail:
+    msg: "Требуется Ubuntu 22.04+. Текущая: {{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }}"
+  when: ansible_facts.distribution != 'Ubuntu' or ansible_facts.distribution_major_version | int < 22
+
+- name: Создать /etc/sysctl.d
+  file:
+    path: /etc/sysctl.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Применить sysctl из конфига
+  template:
+    src: sysctl.conf.j2
+    dest: /etc/sysctl.d/99-ansible-kernel.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload sysctl
+
+- name: Применить sysctl
+  command: sysctl -p /etc/sysctl.d/99-ansible-kernel.conf
+  changed_when: true
+  ignore_errors: yes
+  tags:
+    - sysctl
+
+- name: Настроить limits.conf
+  template:
+    src: limits.conf.j2
+    dest: /etc/security/limits.conf
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Создать /etc/security/limits.d
+  file:
+    path: /etc/security/limits.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Создать файлы limits.d
+  template:
+    src: limits.d.conf.j2
+    dest: "/etc/security/limits.d/{{ item.domain }}_{{ item.item }}.conf"
+    owner: root
+    group: root
+    mode: '0644'
+  with_items: "{{ kernel.ulimits.global | default([]) }}"
+  loop_control:
+    label: "{{ item.domain }} - {{ item.item }}"
+
+- name: Настроить systemd limits
+  lineinfile:
+    path: /etc/systemd/system.conf
+    regexp: "^#?{{ item.name }}="
+    line: "{{ item.name }}={{ item.value }}"
+    state: present
+  with_items:
+    - { name: 'DefaultLimitNOFILE', value: '{{ kernel.ulimits.systemd.DefaultLimitNOFILE | default(65536) }}' }
+    - { name: 'DefaultLimitNPROC', value: '{{ kernel.ulimits.systemd.DefaultLimitNPROC | default(4096) }}' }
+    - { name: 'DefaultLimitMEMLOCK', value: '{{ kernel.ulimits.systemd.DefaultLimitMEMLOCK | default("infinity") }}' }
+  when: kernel.ulimits.systemd is defined
+  notify: Reload systemd
+
+- name: Проверить наличие swap
+  command: swapon --show=NAME --noheadings
+  register: existing_swap
+  changed_when: false
+  ignore_errors: yes
+
+- name: Настроить swappiness
+  sysctl:
+    name: vm.swappiness
+    value: "{{ kernel.swap.swappiness | default(10) }}"
+    state: present
+    reload: yes
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Создать swap-файл (если включено и нет swap)
+  block:
+    - name: Создать swap файл
+      command: |
+        dd if=/dev/zero of={{ kernel.swap.swapfile_path | default('/swapfile') }} bs={{ kernel.swap.swapfile_bs | default('1M') }} count={{ kernel.swap.swapfile_count | default('2048') }}
+      args:
+        creates: "{{ kernel.swap.swapfile_path | default('/swapfile') }}"
+
+    - name: Установить права
+      file:
+        path: "{{ kernel.swap.swapfile_path | default('/swapfile') }}"
+        mode: '0600'
+      ignore_errors: "{{ ansible_check_mode }}"
+
+    - name: Создать swap
+      command: mkswap "{{ kernel.swap.swapfile_path | default('/swapfile') }}"
+      when: not ansible_check_mode
+
+    - name: Активировать swap
+      command: swapon "{{ kernel.swap.swapfile_path | default('/swapfile') }}"
+      when: not ansible_check_mode
+
+    - name: Добавить в fstab
+      mount:
+        path: none
+        src: "{{ kernel.swap.swapfile_path | default('/swapfile') }}"
+        fstype: swap
+        opts: sw
+        state: present
+
+  when:
+    - kernel.swap.create_swapfile | default(false)
+    - ansible_facts.memory_mb.swap.total | default(0) | int == 0
+
+- name: Чёрный список модулей
+  lineinfile:
+    path: /etc/modprobe.d/blacklist-ansible.conf
+    regexp: "^blacklist {{ item }}"
+    line: "blacklist {{ item }}"
+    state: present
+    create: yes
+  with_items: "{{ kernel.blacklist.modules | default([]) }}"
+
+- name: Загрузить нужные модули
+  modprobe:
+    name: "{{ item }}"
+    state: present
+  with_items: "{{ kernel.blacklist.load_modules | default([]) }}"
+
+- name: Проверка настроек
+  block:
+    - name: TCP буферы
+      command: sysctl -n net.ipv4.tcp_rmem
+      changed_when: false
+      ignore_errors: yes
+
+    - name: file-max
+      command: sysctl -n fs.file-max
+      changed_when: false
+      ignore_errors: yes
+
+    - name: swappiness
+      command: sysctl -n vm.swappiness
+      changed_when: false
+      ignore_errors: yes
+
+    - name: swap
+      command: swapon --show=NAME,SIZE,USED --noheadings
+      changed_when: false
+      ignore_errors: yes
+
+    - name: ulimits
+      shell: bash -c "ulimit -a"
+      register: ulimits_check
+      changed_when: false
+      ignore_errors: yes
+  tags:
+    - verify
+    - check

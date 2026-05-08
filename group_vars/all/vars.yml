@@ -1,0 +1,916 @@
+# Глобальные переменные для всех хостов
+# Все значения можно переопределить на уровне хоста или группы
+#
+# ⚠️ СЕКРЕТНЫЕ ДАННЫЕ хранятся в group_vars/all/vault.yml (ansible-vault)
+
+# ==================== ОБЩИЕ НАСТРОЙКИ ====================
+common:
+  # Основные пакеты для установки
+  base_packages:
+    - curl
+    - git
+    - htop
+    - vim
+    - tmux
+    - ufw
+    - fail2ban
+    - apparmor
+    - auditd
+    - chrony
+    - logrotate
+    - rsync
+    - restic
+    - software-properties-common
+    - apt-transport-https
+    - ca-certificates
+    - gnupg
+    - lsb-release
+  
+  extra_packages: []
+  
+  locale: "ru_RU.UTF-8"
+  locale_gen: true
+  timezone: "Europe/Moscow"
+  
+  update_system: true
+  upgrade_packages: true
+  autoremove: true
+  
+  unattended_upgrades:
+    enabled: true
+    upgrade_type: "security"
+    automatic_reboot: false
+    automatic_reboot_time: "03:00"
+    mail_notifications: false
+    mail_recipient: "root"
+  
+  users:
+    - name: "bestadmin"
+      ssh_key: "{{ vault_admin_ssh_key }}"
+      groups: ["sudo"]
+      shell: "/bin/bash"
+  
+  sudo:
+    config_file: "/etc/sudoers.d/ansible_managed"
+    rules:
+      - user: "%sudo"
+        rule: "ALL=(ALL:ALL) NOPASSWD:ALL"
+      - user: "root"
+        rule: "ALL=(ALL:ALL) ALL"
+  
+  set_hostname: true
+  hostname: "{{ inventory_hostname }}"
+  
+  configure_hosts: true
+  hosts_entries:
+    - "127.0.0.1 localhost"
+    - "127.0.1.1 {{ ansible_hostname }} {{ ansible_hostname }}.local"
+    - "::1 ip6-localhost ip6-loopback"
+    - "fe00::0 ip6-localnet"
+    - "ff00::0 ip6-mcastprefix"
+    - "ff02::1 ip6-allnodes"
+    - "ff02::2 ip6-allrouters"
+    - "ff02::3 ip6-allhosts"
+  
+  motd_enabled: true
+  motd_content: |
+    #############################################
+    #         УВАЖАЕМЫЙ ПОЛЬЗОВАТЕЛЬ!          #
+    #############################################
+    
+    ⚠️  Это защищённый сервер Ubuntu 24.04
+    🔐 Доступ разрешён только авторизованным пользователям
+    📊 Мониторинг системы включён
+    💾 Автоматические бэкапы настроены
+    
+    📅 Последний вход: {{ ansible_date_time.date }}
+    ⏰ Текущее время: {{ ansible_date_time.time }}
+    💻 Система: {{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }}
+    
+    ❗ Несанкционированный доступ преследуется по закону
+    #############################################
+  
+  bash_config:
+    colorful_prompt: true
+    history_size: 10000
+    history_timestamp: true
+    enable_completion: true
+  
+  vim_config:
+    enable_syntax: true
+    show_line_numbers: true
+    show_ruler: true
+    enable_mouse: true
+  
+  cleanup:
+    remove_unused_packages: true
+    clean_apt_cache: true
+    clean_tmp_files: true
+    remove_old_kernels: false
+  
+  chrony:
+    enabled: true
+    service_name: "{{ 'chronyd' if ansible_facts.distribution_major_version | int >= 24 else 'chrony' }}"
+    ntp_servers:
+      - "pool.ntp.org"
+      - "time.google.com"
+      - "time.cloudflare.com"
+    local_stratum: 10
+    allowed_networks: []
+
+# ==================== ОПТИМИЗАЦИЯ ЯДРА ====================
+kernel:
+  sysctl:
+    net:
+      net.ipv4.tcp_syncookies: 1
+      net.ipv4.tcp_timestamps: 1
+      net.ipv4.tcp_sack: 1
+      net.ipv4.tcp_fack: 1
+      net.ipv4.tcp_window_scaling: 1
+      net.ipv4.tcp_rfc1337: 1
+      net.ipv4.tcp_tw_reuse: 1
+      net.ipv4.tcp_fin_timeout: 30
+      net.ipv4.tcp_keepalive_time: 1200
+      net.ipv4.tcp_keepalive_probes: 9
+      net.ipv4.tcp_keepalive_intvl: 75
+      net.ipv4.tcp_max_syn_backlog: 8192
+      net.ipv4.tcp_max_tw_buckets: 2000000
+      net.ipv4.tcp_mem: "50576 64768 98152"
+      net.ipv4.tcp_rmem: "4096 87380 16777216"
+      net.ipv4.tcp_wmem: "4096 65536 16777216"
+      net.core.somaxconn: 65535
+      net.core.netdev_max_backlog: 65536
+      net.core.rmem_max: 16777216
+      net.core.wmem_max: 16777216
+      net.core.rmem_default: 262144
+      net.core.wmem_default: 262144
+      net.core.optmem_max: 655360
+      net.ipv4.ip_forward: 0
+      net.ipv4.conf.all.rp_filter: 1
+      net.ipv4.conf.default.rp_filter: 1
+      net.ipv4.conf.all.accept_source_route: 0
+      net.ipv4.conf.default.accept_source_route: 0
+      net.ipv4.conf.all.accept_redirects: 0
+      net.ipv4.conf.default.accept_redirects: 0
+      net.ipv4.conf.all.secure_redirects: 0
+      net.ipv4.conf.default.secure_redirects: 0
+      net.ipv4.conf.all.send_redirects: 0
+      net.ipv4.conf.default.send_redirects: 0
+      net.ipv4.icmp_echo_ignore_broadcasts: 1
+      net.ipv4.icmp_ignore_bogus_error_responses: 1
+      net.ipv6.conf.all.accept_ra: 0
+      net.ipv6.conf.default.accept_ra: 0
+      net.ipv6.conf.all.accept_redirects: 0
+      net.ipv6.conf.default.accept_redirects: 0
+    vm:
+      vm.swappiness: 10
+      vm.vfs_cache_pressure: 50
+      vm.dirty_ratio: 40
+      vm.dirty_background_ratio: 10
+      vm.dirty_expire_centisecs: 3000
+      vm.dirty_writeback_centisecs: 500
+      vm.overcommit_memory: 0
+      vm.overcommit_ratio: 50
+      vm.zone_reclaim_mode: 0
+      vm.min_free_kbytes: 65536
+    fs:
+      fs.file-max: 2097152
+      fs.nr_open: 2097152
+      fs.protected_hardlinks: 1
+      fs.protected_symlinks: 1
+      fs.protected_regular: 2
+      fs.protected_fifos: 2
+      fs.suid_dumpable: 0
+    kernel:
+      kernel.randomize_va_space: 2
+      kernel.kptr_restrict: 2
+      kernel.dmesg_restrict: 1
+      kernel.perf_event_paranoid: 2
+      kernel.yama.ptrace_scope: 1
+      kernel.core_uses_pid: 1
+      kernel.sysrq: 0
+      kernel.msgmax: 65536
+      kernel.msgmnb: 65536
+      kernel.unprivileged_bpf_disabled: 1
+    misc:
+      dev.tty.ldisc_autoload: 0
+      user.max_user_namespaces: 0
+  
+  ulimits:
+    global:
+      - domain: "*"
+        type: "soft"
+        item: "nofile"
+        value: "32768"
+      - domain: "*"
+        type: "hard"
+        item: "nofile"
+        value: "65536"
+      - domain: "*"
+        type: "soft"
+        item: "nproc"
+        value: "2048"
+      - domain: "*"
+        type: "hard"
+        item: "nproc"
+        value: "4096"
+      - domain: "*"
+        type: "soft"
+        item: "core"
+        value: "0"
+      - domain: "*"
+        type: "hard"
+        item: "core"
+        value: "0"
+      - domain: "root"
+        type: "soft"
+        item: "nofile"
+        value: "65536"
+      - domain: "root"
+        type: "hard"
+        item: "nofile"
+        value: "1048576"
+    systemd:
+      DefaultLimitNOFILE: 65536
+      DefaultLimitNPROC: 4096
+      DefaultLimitMEMLOCK: "infinity"
+  
+  swap:
+    enabled: true
+    swappiness: 10
+    vfs_cache_pressure: 50
+    create_swapfile: true
+    swapfile_size: "2G"
+    swapfile_path: "/swapfile"
+    swapfile_bs: "1M"
+    swapfile_count: "2048"
+  
+  io:
+    schedulers:
+      - type: "ssd"
+        scheduler: "mq-deadline"
+        disks: "nvme*"
+      - type: "hdd"
+        scheduler: "bfq"
+        disks: "sd*"
+      - type: "virtual"
+        scheduler: "none"
+        disks: "vd*"
+    mount_options:
+      - filesystem: "ext4"
+        options: "noatime,nodiratime,commit=60"
+      - filesystem: "xfs"
+        options: "noatime,nodiratime"
+  
+  performance:
+    cpu:
+      governor: "performance"
+    hugepages:
+      enabled: false
+      size: "2M"
+      count: 0
+    numa:
+      enabled: false
+      balancing: false
+    irq:
+      enabled: false
+      affinity_policy: "auto"
+  
+  blacklist:
+    modules:
+      - "pcspkr"
+      - "snd_pcsp"
+      - "bluetooth"
+      - "firewire-core"
+      - "thunderbolt"
+    load_modules:
+      - "tcp_bbr"
+  
+  cgroups:
+    version: 2
+    enabled: true
+    controllers:
+      - cpu
+      - memory
+      - io
+      - pids
+  
+  verification:
+    run_tests: true
+    check_tcp_buffers: true
+    check_file_limits: true
+    check_memory_settings: true
+
+# ==================== БЕЗОПАСНОСТЬ ====================
+security:
+  ssh:
+    port: 22
+    disable_root: true
+    password_auth: false
+    permit_empty_passwords: false
+    protocol: 2
+    kex_algorithms: "curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group-exchange-sha256"
+    ciphers: "chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr"
+    macs: "hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,umac-128-etm@openssh.com"
+    permit_tunnel: false
+    allow_tcp_forwarding: no
+    x11_forwarding: no
+    allow_agent_forwarding: no
+    client_alive_interval: 300
+    client_alive_count_max: 2
+    login_grace_time: 60
+    max_auth_tries: 3
+    max_sessions: 2
+    log_level: "VERBOSE"
+    use_pam: yes
+    use_dns: no
+    allow_users: []
+    allow_groups: []
+    host_key_dir: "/etc/ssh"
+    backup_config: yes
+
+  firewall:
+    enabled: true
+    default_incoming: "deny"
+    default_outgoing: "allow"
+    default_routed: "deny"
+    ipv6: true
+    logging: "low"
+    rules:
+      - port: "{{ security.ssh.port }}"
+        proto: "tcp"
+        comment: "SSH доступ"
+      - port: "80"
+        proto: "tcp"
+        comment: "HTTP"
+      - port: "443"
+        proto: "tcp"
+        comment: "HTTPS"
+      - port: "53"
+        proto: "udp"
+        comment: "DNS"
+    rate_limit:
+      enabled: true
+      port: "{{ security.ssh.port }}"
+      proto: "tcp"
+      limit: "6/min"
+
+  fail2ban:
+    enabled: true
+    ban_time: "1h"
+    find_time: "10m"
+    max_retry: 5
+    action: "%(action_)s"
+    dest_email: "root@localhost"
+    sender_email: "fail2ban@localhost"
+    mta: "sendmail"
+    ssh:
+      enabled: true
+      port: "{{ security.ssh.port }}"
+      filter: "sshd"
+      logpath: "/var/log/auth.log"
+      maxretry: 3
+      bantime: "1h"
+      findtime: "10m"
+      backend: "systemd"
+    extra_jails: []
+
+  apparmor:
+    enabled: true
+    mode: "enforce"
+    profiles:
+      - "usr.sbin.sshd"
+      - "usr.bin.curl"
+      - "usr.bin.wget"
+      - "usr.sbin.nginx"
+      - "usr.sbin.mysql"
+      - "usr.sbin.postgresql"
+    extra_profiles: []
+    parser:
+      cache: true
+      base_includes: "/etc/apparmor.d/abstractions"
+
+  auditd:
+    enabled: true
+    log_file: "/var/log/audit/audit.log"
+    log_format: "ENRICHED"
+    log_group: "adm"
+    flush: "INCREMENTAL_ASYNC"
+    freq: 50
+    max_log_file: 8
+    num_logs: 5
+    priority_boost: 4
+    name_format: "HOSTNAME"
+    max_log_file_action: "ROTATE"
+    space_left: 75
+    space_left_action: "SYSLOG"
+    admin_space_left: 50
+    admin_space_left_action: "SUSPEND"
+    disk_full_action: "SUSPEND"
+    disk_error_action: "SUSPEND"
+    use_libwrap: true
+    tcp_listen_queue: 5
+    tcp_max_per_addr: 1
+    tcp_client_max_idle: 0
+    enable_krb5: false
+    krb5_principal: "auditd"
+    rules:
+      - "-w /etc/passwd -p wa -k identity"
+      - "-w /etc/shadow -p wa -k identity"
+      - "-w /etc/group -p wa -k identity"
+      - "-w /etc/gshadow -p wa -k identity"
+      - "-w /etc/sudoers -p wa -k sudoers"
+      - "-w /etc/sudoers.d/ -p wa -k sudoers"
+      - "-w /etc/ssh/ -p wa -k ssh"
+      - "-w /etc/ssh/sshd_config -p wa -k ssh"
+      - "-w /etc/pam.d/ -p wa -k pam"
+      - "-w /etc/security/ -p wa -k pam"
+      - "-w /root -p wa -k root_access"
+      - "-w /tmp -p x -k tmp_execution"
+      - "-w /var/tmp -p x -k tmp_execution"
+      - "-w /var/log/auth.log -p wa -k authentication"
+      - "-w /var/log/lastlog -p wa -k logins"
+      - "-w /etc/apparmor/ -p wa -k apparmor"
+      - "-w /etc/apparmor.d/ -p wa -k apparmor"
+      - "-a always,exit -F arch=b64 -S setuid -S setgid -S setreuid -S setregid -k privilege_escalation"
+      - "-a always,exit -F arch=b64 -S chmod -S fchmod -S fchmodat -S chown -S fchown -S fchownat -S lchown -k file_permissions"
+      - "-a always,exit -F arch=b64 -S execve -S execveat -k process_execution"
+      - "-a never,exclude -F msgtype=USER_AUTH"
+      - "-a never,exclude -F msgtype=CRED_ACQ"
+    extra_rules: []
+
+  core_dumps:
+    enabled: false
+    soft_limit: 0
+    hard_limit: 0
+    
+  syn_flood:
+    enabled: true
+    
+  messages:
+    disable_system_info: true
+
+# ==================== ЛОГИ ====================
+logging:
+  logrotate:
+    maxsize: "100M"
+    rotate: 7
+    compress: true
+    delaycompress: false
+    missingok: true
+    notifempty: true
+    create: true
+    create_mode: "0640"
+    create_owner: "syslog"
+    create_group: "adm"
+    dateext: true
+    dateformat: "-%Y%m%d"
+    system_logs:
+      - name: "dpkg"
+        path: "/var/log/dpkg.log"
+        frequency: "monthly"
+        rotate: 12
+        maxsize: "10M"
+      - name: "apt"
+        path: "/var/log/apt/*.log"
+        frequency: "monthly"
+        rotate: 6
+        maxsize: "10M"
+    extra_configs: []
+
+  journald:
+    system_max_use: "500M"
+    runtime_max_use: "100M"
+    system_max_file_size: "50M"
+    max_retention_sec: "1month"
+    max_file_sec: "1day"
+    storage: "persistent"
+    forward_to_syslog: false
+    forward_to_kmsg: false
+    forward_to_console: false
+    forward_to_wall: true
+    compress: true
+    seal: true
+    split_mode: "uid"
+    sync_interval_sec: 5
+    rate_limit_interval: "30s"
+    rate_limit_burst: 10000
+
+  rsyslog:
+    enabled: true
+    imjournal_statefile: "imjournal.state"
+    action_file_default_template: "RSYSLOG_TraditionalFileFormat"
+    enable_remote: false
+    remote_server: ""
+    remote_port: 514
+    remote_protocol: "udp"
+
+  log_cleanup:
+    enabled: true
+    patterns:
+      - "*.log.*"
+      - "*.log-*"
+      - "*.gz"
+      - "*.old"
+    max_age_days: 30
+    directories:
+      - "/var/log"
+      - "/var/log/nginx"
+      - "/var/log/apache2"
+      - "/var/log/mysql"
+      - "/var/log/postgresql"
+    exclude:
+      - "/var/log/journal/*"
+      - "/var/log/wtmp"
+      - "/var/log/btmp"
+      - "/var/log/lastlog"
+
+  disk_monitoring:
+    warning_threshold: 80
+    critical_threshold: 90
+    check_interval: 15
+    notify_on_critical: true
+
+  syslog_ng:
+    enabled: false
+
+# ==================== МОНИТОРИНГ ====================
+monitoring:
+  node_exporter:
+    enabled: true
+    version: "1.6.1"
+    install_method: "binary"
+    user: "node_exporter"
+    group: "node_exporter"
+    port: 9100
+    listen_address: "0.0.0.0"
+    install_dir: "/opt/node_exporter"
+    config_dir: "/etc/node_exporter"
+    data_dir: "/var/lib/node_exporter"
+    textfile_dir: "/var/lib/node_exporter/textfile_collector"
+    collectors:
+      enabled:
+        - cpu
+        - meminfo
+        - diskstats
+        - filesystem
+        - loadavg
+        - netdev
+        - stat
+        - time
+        - systemd
+        - filefd
+        - vmstat
+        - hwmon
+      disabled:
+        - "arp"
+        - "bonding"
+        - "conntrack"
+        - "entropy"
+        - "mdadm"
+        - "nfs"
+        - "nfsd"
+        - "ntp"
+        - "softnet"
+        - "wifi"
+        - "xfs"
+        - "zfs"
+    timeout: "10s"
+    tls:
+      enabled: false
+      cert_file: ""
+      key_file: ""
+    basic_auth:
+      enabled: false
+      username: ""
+      password: "{{ vault_node_exporter_password | default('') }}"
+    extra_flags:
+      - "--collector.systemd"
+      - "--collector.systemd.enable-restarts-metrics"
+      - "--collector.systemd.enable-start-time-metrics"
+      - "--collector.systemd.enable-task-metrics"
+    systemd:
+      restart: "always"
+      restart_sec: "5s"
+      after:
+        - "network-online.target"
+      wants:
+        - "network-online.target"
+
+  netdata:
+    enabled: false
+    version: "latest"
+    port: 19999
+    config:
+      history: "3600"
+      memory_mode: "ram"
+      page_cache_size: "32"
+      dbengine_disk_space: "256"
+    streaming:
+      enabled: false
+      destination: ""
+      api_key: ""
+
+  system_metrics:
+    disk:
+      warning: 80
+      critical: 90
+      check_interval: 15
+      filesystems:
+        - "/"
+        - "/var"
+        - "/home"
+        - "/tmp"
+    memory:
+      warning: 85
+      critical: 95
+      check_interval: 5
+    cpu:
+      warning: 80
+      critical: 95
+      check_interval: 5
+    load:
+      warning: 5.0
+      critical: 10.0
+      check_interval: 5
+    processes:
+      warning: 500
+      critical: 1000
+      check_interval: 15
+    network:
+      check_interval: 5
+      interfaces:
+        - "eth0"
+        - "ens160"
+        - "ens192"
+
+  additional_tools:
+    htop:
+      enabled: true
+      install: true
+    nload:
+      enabled: false
+      install: false
+    iotop:
+      enabled: false
+      install: false
+    iftop:
+      enabled: false
+      install: false
+      needs_root: true
+    nethogs:
+      enabled: false
+      install: false
+      needs_root: true
+    ncdu:
+      enabled: true
+      install: true
+    ioping:
+      enabled: false
+      install: false
+    smartmontools:
+      enabled: true
+      install: true
+      only_physical: true
+
+  logging:
+    enabled: true
+    log_dir: "/var/log/monitoring"
+    log_retention_days: 30
+    
+  health_checks:
+    enabled: true
+    script_path: "/usr/local/sbin/health-check.sh"
+    check_interval: 15
+    checks:
+      - name: "disk_space"
+        enabled: true
+        warning: 80
+        critical: 90
+      - name: "memory"
+        enabled: true
+        warning: 85
+        critical: 95
+      - name: "cpu"
+        enabled: true
+        warning: 80
+        critical: 95
+      - name: "load"
+        enabled: true
+        warning: 5.0
+        critical: 10.0
+      - name: "ssh"
+        enabled: true
+        port: 22
+      - name: "processes"
+        enabled: true
+        warning: 500
+        critical: 1000
+
+  notifications:
+    enabled: false
+    email:
+      enabled: false
+      smtp_server: "localhost"
+      smtp_port: 25
+      from: "monitoring@localhost"
+      to: "{{ vault_admin_email | default('root@localhost') }}"
+    telegram:
+      enabled: false
+      bot_token: "{{ vault_telegram_bot_token | default('') }}"
+      chat_id: "{{ vault_telegram_chat_id | default('') }}"
+    slack:
+      enabled: false
+      webhook_url: "{{ vault_slack_webhook_url | default('') }}"
+      channel: "#monitoring"
+      username: "server-monitor"
+    discord:
+      enabled: false
+      webhook_url: "{{ vault_discord_webhook_url | default('') }}"
+      username: "Server Monitor"
+
+  prometheus_remote:
+    enabled: false
+    url: ""
+    basic_auth:
+      username: ""
+      password: "{{ vault_prometheus_password | default('') }}"
+    bearer_token: "{{ vault_prometheus_token | default('') }}"
+
+# ==================== БЭКАПЫ ====================
+backup:
+  enabled: true
+  method: "restic"
+  include:
+    directories:
+      - "/etc"
+      - "/home/*/.ssh"
+      - "/root/.ssh"
+    files:
+      - "/etc/passwd"
+      - "/etc/shadow"
+      - "/etc/group"
+      - "/etc/ssh/sshd_config"
+      - "/etc/fstab"
+      - "/etc/hosts"
+      - "/etc/resolv.conf"
+      - "/etc/hostname"
+  
+  exclude:
+    patterns:
+      - "*.tmp"
+      - "*.temp"
+      - "*.log"
+      - "*.cache"
+      - "*/.cache/*"
+      - "*/tmp/*"
+      - "/tmp/*"
+      - "/var/tmp/*"
+      - "/var/cache/*"
+      - "*/node_modules/*"
+      - "*/.git/*"
+      - "*/vendor/*"
+    max_file_size: "1G"
+  
+  restic:
+    password: "{{ vault_restic_password }}"
+    repository: "/backup/repository"
+    version: "0.16.0"
+    binary_path: "/usr/local/bin/restic"
+    performance:
+      compression: "auto"
+      pack_size: "32"
+      read_concurrency: 2
+    retention:
+      keep_last: 7
+      keep_daily: 30
+      keep_weekly: 12
+      keep_monthly: 6
+      keep_yearly: 2
+      keep_within: "1w"
+    schedule:
+      daily: "04:00"
+      weekly: "sun 05:00"
+      monthly: "1 06:00"
+    tags:
+      - "ansible-managed"
+      - "system"
+      - "{{ inventory_hostname }}"
+
+  local_storage:
+    enabled: true
+    path: "/backup"
+    min_free_space: "10G"
+    alert_threshold: 80
+    mount:
+      enabled: false
+      device: ""
+      filesystem: "ext4"
+      options: "defaults,noatime"
+
+  remote_storage:
+    enabled: false
+    type: "s3"
+    s3:
+      endpoint: "s3.amazonaws.com"
+      bucket: "your-backup-bucket"
+      region: "us-east-1"
+      access_key: "{{ vault_aws_access_key | default('') }}"
+      secret_key: "{{ vault_aws_secret_key | default('') }}"
+    b2:
+      account_id: "{{ vault_b2_account_id | default('') }}"
+      account_key: "{{ vault_b2_account_key | default('') }}"
+      bucket: "your-backup-bucket"
+    sftp:
+      host: "backup.server.com"
+      port: 22
+      user: "backup"
+      path: "/backups/{{ inventory_hostname }}"
+      key_file: "/root/.ssh/backup_rsa"
+      
+  encryption:
+    enabled: true
+    type: "age"
+    age:
+      key: "{{ vault_age_key | default('') }}"
+      public_key: "{{ vault_age_public_key | default('') }}"
+    gpg:
+      key_id: "{{ vault_gpg_key_id | default('') }}"
+      passphrase: "{{ vault_gpg_passphrase | default('') }}"
+
+  verification:
+    enabled: true
+    check_integrity: true
+    schedule: "weekly"
+    day: "sun"
+    time: "03:00"
+    timeout: "1h"
+    notify_on_failure: true
+
+  restore:
+    target_dir: "/restore"
+    default_version: "latest"
+    overwrite: false
+
+  notifications:
+    email:
+      enabled: false
+      smtp_server: "localhost"
+      smtp_port: 25
+      from: "backup@localhost"
+      to: "{{ vault_admin_email | default('root@localhost') }}"
+      on_success: false
+      on_failure: true
+      on_verify_failure: true
+    telegram:
+      enabled: false
+      bot_token: "{{ vault_telegram_bot_token | default('') }}"
+      chat_id: "{{ vault_telegram_chat_id | default('') }}"
+      on_success: false
+      on_failure: true
+    slack:
+      enabled: false
+      webhook_url: "{{ vault_slack_webhook_url | default('') }}"
+      channel: "#backups"
+      username: "backup-bot"
+      on_success: false
+      on_failure: true
+
+  logging:
+    enabled: true
+    log_dir: "/var/log/backup"
+    log_retention_days: 30
+    verbose: false
+
+  monitoring:
+    prometheus:
+      enabled: true
+      textfile_dir: "/var/lib/node_exporter/textfile_collector"
+      metrics:
+        - backup_last_run_timestamp
+        - backup_last_success_timestamp
+        - backup_duration_seconds
+        - backup_size_bytes
+        - backup_files_new
+        - backup_files_changed
+        - backup_files_unmodified
+        - backup_errors_total
+        - backup_verify_success
+        
+  pre_backup_checks:
+    enabled: true
+    checks:
+      - name: "disk_space"
+        enabled: true
+        min_free_percent: 10
+      - name: "load_average"
+        enabled: true
+        max_load: 5.0
+      - name: "required_services"
+        enabled: true
+        services:
+          - "ssh"
+          - "cron"
+      - name: "exclude_running_processes"
+        enabled: false
+        processes: []

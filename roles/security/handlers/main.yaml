@@ -1,0 +1,49 @@
+---
+# Обработчики для роли security
+
+- name: Reload SSH
+  systemd:
+    name: ssh
+    state: reloaded
+    daemon_reload: yes
+
+- name: Restart SSH
+  systemd:
+    name: ssh
+    state: restarted
+    daemon_reload: yes
+
+- name: Restart fail2ban
+  systemd:
+    name: fail2ban
+    state: restarted
+    daemon_reload: yes
+
+- name: Reload AppArmor
+  command: apparmor_parser -r /etc/apparmor.d/
+
+- name: Restart auditd
+  systemd:
+    name: auditd
+    state: restarted
+    daemon_reload: yes
+  ignore_errors: yes
+
+- name: Reload UFW
+  ufw:
+    state: reloaded
+
+- name: Enable UFW
+  ufw:
+    state: enabled
+  ignore_errors: yes
+
+- name: Restart chrony
+  systemd:
+    name: "{{ 'chronyd' if ansible_facts.distribution_major_version | int >= 24 else 'chrony' }}"
+    state: restarted
+    daemon_reload: yes
+  ignore_errors: yes
+
+- name: Update grub
+  command: update-grub

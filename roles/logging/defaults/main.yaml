@@ -1,0 +1,184 @@
+# Default variables for logging role
+# Управление логами Ubuntu 22.04
+
+logging:
+  # logrotate настройки
+  logrotate:
+    # Максимальный размер файла лога (100M, 1G)
+    maxsize: "100M"
+    
+    # Количество архивов для хранения
+    rotate: 7
+    
+    # Сжимать архивы
+    compress: true
+    
+    # Не сжимать самый свежий архив
+    delaycompress: false
+    
+    # Не выдавать ошибку если файл отсутствует
+    missingok: true
+    
+    # Не ротировать пустые файлы
+    notifempty: true
+    
+    # Создать новый файл после ротации
+    create: true
+    create_mode: "0640"
+    create_owner: "syslog"
+    create_group: "adm"
+    
+    # Дата в имени архива
+    dateext: true
+    
+    # Формат даты в имени архива
+    dateformat: "-%Y%m%d"
+    
+    # Конфигурации для system logs
+    system_logs:
+      - name: "syslog"
+        path: "/var/log/syslog"
+        frequency: "daily"
+        rotate: 7
+        maxsize: "100M"
+      - name: "auth"
+        path: "/var/log/auth.log"
+        frequency: "daily"
+        rotate: 14
+        maxsize: "50M"
+      - name: "kern"
+        path: "/var/log/kern.log"
+        frequency: "daily"
+        rotate: 7
+        maxsize: "50M"
+      - name: "dpkg"
+        path: "/var/log/dpkg.log"
+        frequency: "monthly"
+        rotate: 12
+        maxsize: "10M"
+      - name: "apt"
+        path: "/var/log/apt/*.log"
+        frequency: "monthly"
+        rotate: 6
+        maxsize: "10M"
+    
+    # Дополнительные конфигурации
+    extra_configs: []
+    # Пример:
+    # extra_configs:
+    #   - name: "nginx"
+    #     path: "/var/log/nginx/*.log"
+    #     frequency: "daily"
+    #     rotate: 14
+
+  # journald настройки
+  journald:
+    # Максимальный размер журнала
+    system_max_use: "500M"
+    
+    # Максимальный размер для runtime журнала
+    runtime_max_use: "100M"
+    
+    # Максимальный размер отдельного файла
+    system_max_file_size: "50M"
+    
+    # Максимальное время хранения
+    max_retention_sec: "1month"
+    
+    # Ротация файла каждые N
+    max_file_sec: "1day"
+    
+    # Хранение журнала (persistent, auto, volatile, none)
+    storage: "persistent"
+    
+    # Пересылать в syslog
+    forward_to_syslog: false
+    
+    # Пересылать в kmsg
+    forward_to_kmsg: false
+    
+    # Пересылать в консоль
+    forward_to_console: false
+    
+    # Пересылать в wall
+    forward_to_wall: true
+    
+    # Сжимать данные
+    compress: true
+    
+    # Подписывать данные (проверка целостности)
+    seal: true
+    
+    # Разделитель приоритетов
+    split_mode: "uid"
+    
+    # Синхронизировать данные на диск
+    sync_interval_sec: 5
+    
+    # Проверять свободное место
+    rate_limit_interval: "30s"
+    rate_limit_burst: 10000
+
+  # RSyslog настройки
+  rsyslog:
+    enabled: true
+    
+    # Настройки логирования
+    imjournal_statefile: "imjournal.state"
+    
+    # Формат логов
+    action_file_default_template: "RSYSLOG_TraditionalFileFormat"
+    
+    # Дополнительные настройки
+    enable_remote: false
+    remote_server: ""
+    remote_port: 514
+    remote_protocol: "udp"  # udp, tcp
+
+  # Очистка старых логов
+  log_cleanup:
+    enabled: true
+    
+    # Паттерны файлов для удаления
+    patterns:
+      - "*.log.*"
+      - "*.log-*"
+      - "*.gz"
+      - "*.old"
+    
+    # Максимальный возраст файлов (дни)
+    max_age_days: 30
+    
+    # Директории для очистки
+    directories:
+      - "/var/log"
+      - "/var/log/nginx"
+      - "/var/log/apache2"
+      - "/var/log/mysql"
+      - "/var/log/postgresql"
+    
+    # Исключения (не удалять)
+    exclude:
+      - "/var/log/journal/*"
+      - "/var/log/wtmp"
+      - "/var/log/btmp"
+      - "/var/log/lastlog"
+
+  # Мониторинг дискового пространства
+  disk_monitoring:
+    # Предупреждение при заполнении (%)
+    warning_threshold: 80
+    
+    # Критическое при заполнении (%)
+    critical_threshold: 90
+    
+    # Проверять каждые N минут
+    check_interval: 15
+    
+    # Уведомление при критическом уровне
+    notify_on_critical: true
+
+  # Настройки syslog-ng (альтернатива rsyslog)
+  syslog_ng:
+    enabled: false
+    # Настройки если нужен syslog-ng вместо rsyslog

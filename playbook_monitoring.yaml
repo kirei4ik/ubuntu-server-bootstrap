@@ -1,0 +1,51 @@
+---
+# Playbook для настройки мониторинга (node_exporter)
+# Можно запускать отдельно после playbook_prepare.yaml + playbook_activate.yaml
+#
+# Запуск:
+#   ansible-playbook playbook_monitoring.yaml --ask-vault-pass
+#
+# Тестовый запуск:
+#   ansible-playbook playbook_monitoring.yaml --check --diff --ask-vault-pass
+
+- name: Настройка мониторинга на сервере
+  hosts: all
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Проверить ОС
+      fail:
+        msg: "Требуется Ubuntu 22.04 и новее. Текущая: {{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }}"
+      when: ansible_facts.distribution != 'Ubuntu' or ansible_facts.distribution_major_version | int < 22
+
+    - name: Показать настройки мониторинга
+      debug:
+        msg: |
+          ==============================================
+          📊 НАСТРОЙКА МОНИТОРИНГА
+
+          Node_exporter: порт {{ monitoring.node_exporter.port }} ({{ monitoring.node_exporter.enabled | ternary('вкл', 'выкл') }})
+          Netdata: порт {{ monitoring.netdata.port }} ({{ monitoring.netdata.enabled | ternary('вкл', 'выкл') }})
+          Health-check: каждые {{ monitoring.health_checks.check_interval }} мин
+          ==============================================
+
+  roles:
+    - role: monitoring
+
+  post_tasks:
+    - name: Проверка статуса
+      debug:
+        msg: |
+          ==============================================
+          ✅ МОНИТОРИНГ НАСТРОЕН
+
+          Проверка node_exporter:
+          curl http://localhost:{{ monitoring.node_exporter.port }}/metrics
+
+          Проверка статуса:
+          sudo systemctl status node_exporter
+
+          Health-check скрипт:
+          sudo /usr/local/sbin/health-check.sh
+          ==============================================
