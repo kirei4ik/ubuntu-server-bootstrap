@@ -2,12 +2,17 @@
 set -Eeuo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STATE_DIR="${TMPDIR:-/tmp}/ubuntu-bootstrap"
+STATE_FILE="$STATE_DIR/state.sh"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ubuntu-bootstrap.XXXXXX")"
 INVENTORY_FILE="$TMP_DIR/inventory.yml"
 VARS_FILE="$TMP_DIR/vars.yml"
 KNOWN_HOSTS_FILE="$TMP_DIR/known_hosts"
+KEYSCAN_ERROR_FILE="$TMP_DIR/known_hosts.error"
 trap 'rm -rf "$TMP_DIR"' EXIT
 umask 077
+mkdir -p "$STATE_DIR"
+chmod 700 "$STATE_DIR"
 
 die() {
   echo "Ошибка: $*" >&2
@@ -32,93 +37,128 @@ valid_public_key() {
   [[ "$1" =~ ^(ssh-ed25519|ssh-rsa|ecdsa-[^[:space:]]+|sk-[^[:space:]]+)[[:space:]]+[A-Za-z0-9+/=]+([[:space:]]+.*)?$ ]]
 }
 
+save_input_state() {
+  local state_tmp="${STATE_FILE}.tmp.$$"
+  declare -p SERVER_ADDRESS ROOT_USER ROOT_PASSWORD SERVER_HOSTNAME \
+    PRIMARY_USER PRIMARY_KEY USERS_YAML USERS_SUMMARY FIREWALL_RULES FIREWALL_SUMMARY \
+    >"$state_tmp"
+  chmod 600 "$state_tmp"
+  mv -f "$state_tmp" "$STATE_FILE"
+}
+
 command -v ansible-playbook >/dev/null 2>&1 || die "не найден ansible-playbook"
 command -v ssh >/dev/null 2>&1 || die "не найден ssh"
 command -v ssh-keyscan >/dev/null 2>&1 || die "не найден ssh-keyscan"
 command -v ssh-keygen >/dev/null 2>&1 || die "не найден ssh-keygen"
 
-read -r -p "IP или hostname сервера: " SERVER_ADDRESS
-[[ -n "$SERVER_ADDRESS" ]] || die "адрес сервера не может быть пустым"
+RESUME_STATE=false
+if [[ -f "$STATE_FILE" ]]; then
+  echo "Найдены сохранённые данные незавершённого bootstrap."
+  read -r -p "Продолжить с ними? [Y/n]: " RESUME_CONFIRM
+  if [[ ! "${RESUME_CONFIRM:-Y}" =~ ^([nN]|[nN][oO])$ ]]; then
+    # The file is created by this script with mode 0600 in a mode 0700 directory.
+    source "$STATE_FILE"
+    RESUME_STATE=true
+  else
+    rm -f "$STATE_FILE"
+  fi
+fi
 
-read -r -p "Root-пользователь [root]: " ROOT_USER
-ROOT_USER="${ROOT_USER:-root}"
-read -r -s -p "Пароль пользователя $ROOT_USER: " ROOT_PASSWORD
-printf '\n'
-[[ -n "$ROOT_PASSWORD" ]] || die "пароль не может быть пустым"
+if [[ "$RESUME_STATE" == false ]]; then
+  read -r -p "IP или hostname сервера: " SERVER_ADDRESS
+  [[ -n "$SERVER_ADDRESS" ]] || die "адрес сервера не может быть пустым"
 
-DEFAULT_HOSTNAME="${SERVER_ADDRESS//./-}"
-read -r -p "Hostname [$DEFAULT_HOSTNAME]: " SERVER_HOSTNAME
-SERVER_HOSTNAME="${SERVER_HOSTNAME:-$DEFAULT_HOSTNAME}"
-valid_hostname "$SERVER_HOSTNAME" || die "некорректный hostname"
+  read -r -p "Root-пользователь [root]: " ROOT_USER
+  ROOT_USER="${ROOT_USER:-root}"
+  read -r -s -p "Пароль пользователя $ROOT_USER: " ROOT_PASSWORD
+  printf '\n'
+  [[ -n "$ROOT_PASSWORD" ]] || die "пароль не может быть пустым"
 
-read -r -p "Имя основного администратора [bestadmin]: " PRIMARY_USER
-PRIMARY_USER="${PRIMARY_USER:-bestadmin}"
-valid_username "$PRIMARY_USER" || die "некорректное имя пользователя"
+  DEFAULT_HOSTNAME="${SERVER_ADDRESS//./-}"
+  read -r -p "Hostname [$DEFAULT_HOSTNAME]: " SERVER_HOSTNAME
+  SERVER_HOSTNAME="${SERVER_HOSTNAME:-$DEFAULT_HOSTNAME}"
+  valid_hostname "$SERVER_HOSTNAME" || die "некорректный hostname"
 
-read -r -p "Публичный SSH-ключ для $PRIMARY_USER: " PRIMARY_KEY
-valid_public_key "$PRIMARY_KEY" || die "некорректный формат публичного SSH-ключа"
+  read -r -p "Имя основного администратора [bestadmin]: " PRIMARY_USER
+  PRIMARY_USER="${PRIMARY_USER:-bestadmin}"
+  valid_username "$PRIMARY_USER" || die "некорректное имя пользователя"
 
-USERS_YAML="  - name: $(quote_yaml "$PRIMARY_USER")\n    ssh_key: $(quote_yaml "$PRIMARY_KEY")\n    groups: [\"sudo\"]\n    shell: /bin/bash\n"
-USERS_SUMMARY="  - $PRIMARY_USER (admin)\n"
+  read -r -p "Публичный SSH-ключ для $PRIMARY_USER: " PRIMARY_KEY
+  valid_public_key "$PRIMARY_KEY" || die "некорректный формат публичного SSH-ключа"
 
-while true; do
-  read -r -p "Добавить ещё пользователя? [y/N]: " ADD_USER
-  case "${ADD_USER:-N}" in
-    y|Y|yes|Yes)
-      read -r -p "Имя пользователя: " USER_NAME
-      valid_username "$USER_NAME" || die "некорректное имя пользователя"
-      [[ "$USER_NAME" != "$PRIMARY_USER" ]] || die "пользователь уже добавлен"
-      read -r -p "Роль (admin/user) [user]: " USER_ROLE
-      USER_ROLE="${USER_ROLE:-user}"
-      [[ "$USER_ROLE" == "admin" || "$USER_ROLE" == "user" ]] || die "роль должна быть admin или user"
-      read -r -p "Публичный SSH-ключ для $USER_NAME: " USER_KEY
-      valid_public_key "$USER_KEY" || die "некорректный формат публичного SSH-ключа"
-      if [[ "$USER_ROLE" == "admin" ]]; then
-        USER_GROUPS='["sudo"]'
-      else
-        USER_GROUPS='[]'
-      fi
-      USERS_YAML+="  - name: $(quote_yaml "$USER_NAME")\n    ssh_key: $(quote_yaml "$USER_KEY")\n    groups: $USER_GROUPS\n    shell: /bin/bash\n"
-      USERS_SUMMARY+="  - $USER_NAME ($USER_ROLE)\n"
-      ;;
-    n|N|no|No|'')
-      break
-      ;;
-    *)
-      echo "Введите y или n."
-      ;;
-  esac
-done
+  USERS_YAML="  - name: $(quote_yaml "$PRIMARY_USER")\n    ssh_key: $(quote_yaml "$PRIMARY_KEY")\n    groups: [\"sudo\"]\n    shell: /bin/bash\n"
+  USERS_SUMMARY="  - $PRIMARY_USER (admin)\n"
 
-FIREWALL_RULES="  - port: '22'\n    proto: tcp\n    comment: 'SSH доступ'\n"
-FIREWALL_SUMMARY="  - 22/tcp — SSH (обязательно)\n"
-while true; do
-  read -r -p "Добавить входящий порт? [y/N]: " ADD_PORT
-  case "${ADD_PORT:-N}" in
-    y|Y|yes|Yes)
-      read -r -p "Порт (например 80 или 443): " PORT
-      [[ "$PORT" =~ ^[0-9]+$ ]] && (( PORT >= 1 && PORT <= 65535 )) || die "некорректный порт"
-      read -r -p "Протокол (tcp/udp) [tcp]: " PROTO
-      PROTO="${PROTO:-tcp}"
-      [[ "$PROTO" == "tcp" || "$PROTO" == "udp" ]] || die "протокол должен быть tcp или udp"
-      read -r -p "Комментарий [custom]: " COMMENT
-      COMMENT="${COMMENT:-custom}"
-      FIREWALL_RULES+="  - port: $(quote_yaml "$PORT")\n    proto: $(quote_yaml "$PROTO")\n    comment: $(quote_yaml "$COMMENT")\n"
-      FIREWALL_SUMMARY+="  - $PORT/$PROTO — $COMMENT\n"
-      ;;
-    n|N|no|No|'')
-      break
-      ;;
-    *)
-      echo "Введите y или n."
-      ;;
-  esac
-done
+  while true; do
+    read -r -p "Добавить ещё пользователя? [y/N]: " ADD_USER
+    case "${ADD_USER:-N}" in
+      y|Y|yes|Yes)
+        read -r -p "Имя пользователя: " USER_NAME
+        valid_username "$USER_NAME" || die "некорректное имя пользователя"
+        [[ "$USER_NAME" != "$PRIMARY_USER" ]] || die "пользователь уже добавлен"
+        read -r -p "Роль (admin/user) [user]: " USER_ROLE
+        USER_ROLE="${USER_ROLE:-user}"
+        [[ "$USER_ROLE" == "admin" || "$USER_ROLE" == "user" ]] || die "роль должна быть admin или user"
+        read -r -p "Публичный SSH-ключ для $USER_NAME: " USER_KEY
+        valid_public_key "$USER_KEY" || die "некорректный формат публичного SSH-ключа"
+        if [[ "$USER_ROLE" == "admin" ]]; then
+          USER_GROUPS='["sudo"]'
+        else
+          USER_GROUPS='[]'
+        fi
+        USERS_YAML+="  - name: $(quote_yaml "$USER_NAME")\n    ssh_key: $(quote_yaml "$USER_KEY")\n    groups: $USER_GROUPS\n    shell: /bin/bash\n"
+        USERS_SUMMARY+="  - $USER_NAME ($USER_ROLE)\n"
+        ;;
+      n|N|no|No|'')
+        break
+        ;;
+      *)
+        echo "Введите y или n."
+        ;;
+    esac
+  done
+
+  FIREWALL_RULES="  - port: '22'\n    proto: tcp\n    comment: 'SSH доступ'\n"
+  FIREWALL_SUMMARY="  - 22/tcp — SSH (обязательно)\n"
+  while true; do
+    read -r -p "Добавить дополнительный входящий порт (кроме SSH 22/tcp)? [y/N]: " ADD_PORT
+    case "${ADD_PORT:-N}" in
+      y|Y|yes|Yes)
+        read -r -p "Порт (например 80 или 443): " PORT
+        [[ "$PORT" =~ ^[0-9]+$ ]] && (( PORT >= 1 && PORT <= 65535 )) || die "некорректный порт"
+        read -r -p "Протокол (tcp/udp) [tcp]: " PROTO
+        PROTO="${PROTO:-tcp}"
+        [[ "$PROTO" == "tcp" || "$PROTO" == "udp" ]] || die "протокол должен быть tcp или udp"
+        read -r -p "Комментарий [custom]: " COMMENT
+        COMMENT="${COMMENT:-custom}"
+        FIREWALL_RULES+="  - port: $(quote_yaml "$PORT")\n    proto: $(quote_yaml "$PROTO")\n    comment: $(quote_yaml "$COMMENT")\n"
+        FIREWALL_SUMMARY+="  - $PORT/$PROTO — $COMMENT\n"
+        ;;
+      n|N|no|No|'')
+        break
+        ;;
+      *)
+        echo "Введите y или n."
+        ;;
+    esac
+  done
+
+  save_input_state
+  echo "Введённые данные сохранены во временный файл для возможности продолжить."
+fi
 
 echo
 echo "Проверка host key сервера"
-ssh-keyscan -T 10 -t ed25519,ecdsa,rsa "$SERVER_ADDRESS" 2>/dev/null >"$KNOWN_HOSTS_FILE" \
-  || die "не удалось получить host key сервера"
+if ! ssh-keyscan -T 10 -t ed25519,ecdsa,rsa "$SERVER_ADDRESS" \
+  >"$KNOWN_HOSTS_FILE" 2>"$KEYSCAN_ERROR_FILE"; then
+  echo "Не удалось получить host key сервера." >&2
+  if [[ -s "$KEYSCAN_ERROR_FILE" ]]; then
+    echo "Причина от ssh-keyscan:" >&2
+    sed 's/^/  /' "$KEYSCAN_ERROR_FILE" >&2
+  fi
+  echo "Проверьте адрес сервера, доступность TCP-порта 22 и запущенный SSH-сервис." >&2
+  exit 1
+fi
 [[ -s "$KNOWN_HOSTS_FILE" ]] || die "сервер не вернул host key"
 echo "Полученные fingerprints:"
 ssh-keygen -lf "$KNOWN_HOSTS_FILE" -E sha256
@@ -219,6 +259,7 @@ echo "[6/8] Проверяем fail2ban и auditd"
 ssh -o BatchMode=yes -o UserKnownHostsFile="$KNOWN_HOSTS_FILE" -o StrictHostKeyChecking=yes "$PRIMARY_USER@$SERVER_ADDRESS" \
   'systemctl is-active fail2ban; systemctl is-active auditd'
 
+rm -f "$STATE_FILE"
 echo "[7/8] Host key сохранён только во временном файле и удалён после завершения"
 echo "[8/8] Настройка завершена"
 echo "Подключение: ssh $PRIMARY_USER@$SERVER_ADDRESS"
