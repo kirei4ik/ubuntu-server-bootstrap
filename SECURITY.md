@@ -1,0 +1,26 @@
+# Security notes
+
+Этот репозиторий содержит Ansible-роли для базовой настройки Ubuntu Server. Он не должен содержать реальные IP-адреса production-серверов, пароли, приватные ключи, webhook URL или незашифрованные Vault-файлы.
+
+## Перед первым публичным push
+
+1. Проверьте текущие файлы и историю на наличие credentials.
+2. Если какой-либо пароль или токен когда-либо попал в Git, немедленно замените его у провайдера.
+3. Используйте сильный пароль Ansible Vault и не публикуйте его.
+4. Для bootstrap вводите root-пароль только интерактивно. Скрипт хранит его лишь во временном inventory с правами `0600`.
+5. Публичные SSH-ключи допустимы, приватные ключи — нет.
+
+## Ansible Vault
+
+Секреты для опционального backup/monitoring храните в локальном файле:
+
+```bash
+cp group_vars/all/vault.yml.example group_vars/all/vault.yml
+ansible-vault encrypt group_vars/all/vault.yml
+```
+
+Файл `group_vars/all/vault.yml` игнорируется Git. Не добавляйте его принудительно без отдельной проверки.
+
+## SSH host keys
+
+`bootstrap.sh` получает host key сервера, показывает SHA256 fingerprint и требует подтверждения. Сверяйте fingerprint с панелью провайдера или out-of-band консолью.

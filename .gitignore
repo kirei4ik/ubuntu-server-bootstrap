@@ -1,0 +1,27 @@
+# Local OS/editor files
+.DS_Store
+.idea/
+.vscode/
+
+# Ansible runtime files
+*.retry
+
+# Local credentials and secret material
+.env
+.env.*
+!.env.example
+.vault_pass
+.vault-password
+group_vars/**/vault.yml
+host_vars/**/vault.yml
+
+# Local inventories may contain server addresses and credentials
+inventory.yaml
+inventory.yml
+inventory-*.yaml
+inventory-*.yml
+maintenance-inventory.yml
+maintenance-inventory.yaml
+
+# Temporary bootstrap files
+ubuntu-bootstrap.*
