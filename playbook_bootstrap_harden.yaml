@@ -30,8 +30,19 @@
       ansible.builtin.command: systemctl is-active fail2ban
       register: bootstrap_fail2ban_status
       changed_when: false
+    - name: Проверить эффективную SSH-конфигурацию
+      ansible.builtin.command: sshd -T
+      register: bootstrap_sshd_config
+      changed_when: false
+      failed_when: >-
+        bootstrap_sshd_config.rc != 0 or
+        'permitrootlogin no' not in bootstrap_sshd_config.stdout or
+        'passwordauthentication no' not in bootstrap_sshd_config.stdout or
+        'pubkeyauthentication yes' not in bootstrap_sshd_config.stdout or
+        'kbdinteractiveauthentication no' not in bootstrap_sshd_config.stdout
     - name: Показать результат
       ansible.builtin.debug:
         msg:
           - "UFW: {{ bootstrap_ufw_status.stdout }}"
           - "fail2ban: {{ bootstrap_fail2ban_status.stdout }}"
+          - "SSH hardening: PermitRootLogin no, PasswordAuthentication no, PubkeyAuthentication yes, KbdInteractiveAuthentication no"

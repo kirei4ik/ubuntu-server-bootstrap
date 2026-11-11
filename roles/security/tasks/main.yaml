@@ -34,6 +34,8 @@
         - { regexp: 'Protocol\s+', line: 'Protocol {{ security.ssh.protocol }}' }
         - { regexp: 'PermitRootLogin\s+', line: 'PermitRootLogin {{ "no" if security_stage == "activate" and security.ssh.disable_root else "yes" }}' }
         - { regexp: 'PasswordAuthentication\s+', line: 'PasswordAuthentication {{ "yes" if security_stage == "prepare" else ("yes" if security.ssh.password_auth else "no") }}' }
+        - { regexp: 'PubkeyAuthentication\s+', line: 'PubkeyAuthentication yes' }
+        - { regexp: 'KbdInteractiveAuthentication\s+', line: 'KbdInteractiveAuthentication no' }
         - { regexp: 'PermitEmptyPasswords\s+', line: 'PermitEmptyPasswords {{ "yes" if security.ssh.permit_empty_passwords else "no" }}' }
         - { regexp: 'ChallengeResponseAuthentication\s+', line: 'ChallengeResponseAuthentication no' }
         - { regexp: 'UsePAM\s+', line: 'UsePAM {{ "yes" if security.ssh.use_pam else "no" }}' }

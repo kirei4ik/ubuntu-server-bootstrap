@@ -5,6 +5,7 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ubuntu-bootstrap.XXXXXX")"
 INVENTORY_FILE="$TMP_DIR/inventory.yml"
 VARS_FILE="$TMP_DIR/vars.yml"
+KNOWN_HOSTS_FILE="$TMP_DIR/known_hosts"
 trap 'rm -rf "$TMP_DIR"' EXIT
 umask 077
 
@@ -33,6 +34,8 @@ valid_public_key() {
 
 command -v ansible-playbook >/dev/null 2>&1 || die "не найден ansible-playbook"
 command -v ssh >/dev/null 2>&1 || die "не найден ssh"
+command -v ssh-keyscan >/dev/null 2>&1 || die "не найден ssh-keyscan"
+command -v ssh-keygen >/dev/null 2>&1 || die "не найден ssh-keygen"
 
 read -r -p "IP или hostname сервера: " SERVER_ADDRESS
 [[ -n "$SERVER_ADDRESS" ]] || die "адрес сервера не может быть пустым"
@@ -112,6 +115,17 @@ while true; do
   esac
 done
 
+echo
+echo "Проверка host key сервера"
+ssh-keyscan -T 10 -t ed25519,ecdsa,rsa "$SERVER_ADDRESS" 2>/dev/null >"$KNOWN_HOSTS_FILE" \
+  || die "не удалось получить host key сервера"
+[[ -s "$KNOWN_HOSTS_FILE" ]] || die "сервер не вернул host key"
+echo "Полученные fingerprints:"
+ssh-keygen -lf "$KNOWN_HOSTS_FILE" -E sha256
+read -r -p "Сверьте fingerprint с панелью провайдера и подтвердите? [y/N]: " HOST_KEY_CONFIRM
+[[ "${HOST_KEY_CONFIRM:-N}" =~ ^([yY]|[yY][eE][sS])$ ]] \
+  || { echo "Настройка отменена: host key не подтверждён."; exit 0; }
+
 cat >"$INVENTORY_FILE" <<EOF
 all:
   hosts:
@@ -164,15 +178,16 @@ EOF
 read -r -p "Начать настройку? [y/N]: " CONFIRM
 [[ "${CONFIRM:-N}" =~ ^([yY]|[yY][eE][sS])$ ]] || { echo "Настройка отменена."; exit 0; }
 
-echo "[1/7] Подготавливаем сервер и создаём пользователей"
-ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook \
+echo "[1/8] Подготавливаем сервер и создаём пользователей"
+ANSIBLE_HOST_KEY_CHECKING=True ANSIBLE_SSH_ARGS="-o UserKnownHostsFile=$KNOWN_HOSTS_FILE -o StrictHostKeyChecking=yes" ansible-playbook \
   -i "$INVENTORY_FILE" \
   "$PROJECT_DIR/playbook_bootstrap_prepare.yaml" \
   -e "@$VARS_FILE"
 
-echo "[2/7] Проверяем SSH-вход под $PRIMARY_USER"
+echo "[2/8] Проверяем SSH-вход под $PRIMARY_USER"
 ssh -o BatchMode=yes -o ConnectTimeout=10 -o PasswordAuthentication=no \
-  -o StrictHostKeyChecking=no "$PRIMARY_USER@$SERVER_ADDRESS" true \
+  -o UserKnownHostsFile="$KNOWN_HOSTS_FILE" -o StrictHostKeyChecking=yes \
+  "$PRIMARY_USER@$SERVER_ADDRESS" true \
   || die "не удалось войти под $PRIMARY_USER. Проверьте, что соответствующий приватный ключ доступен ssh-agent или стандартному SSH-клиенту"
 
 cat >"$INVENTORY_FILE" <<EOF
@@ -184,24 +199,26 @@ all:
       ansible_port: 22
 EOF
 
-echo "[3/7] Применяем SSH hardening, UFW и security-сервисы"
-ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook \
+echo "[3/8] Применяем SSH hardening, UFW и security-сервисы"
+ANSIBLE_HOST_KEY_CHECKING=True ANSIBLE_SSH_ARGS="-o UserKnownHostsFile=$KNOWN_HOSTS_FILE -o StrictHostKeyChecking=yes" ansible-playbook \
   -i "$INVENTORY_FILE" \
   "$PROJECT_DIR/playbook_bootstrap_harden.yaml" \
   -e "@$VARS_FILE"
 
-echo "[4/7] Проверяем доступ под $PRIMARY_USER после hardening"
+echo "[4/8] Проверяем доступ под $PRIMARY_USER после hardening"
 ssh -o BatchMode=yes -o ConnectTimeout=10 -o PasswordAuthentication=no \
-  -o StrictHostKeyChecking=no "$PRIMARY_USER@$SERVER_ADDRESS" true \
+  -o UserKnownHostsFile="$KNOWN_HOSTS_FILE" -o StrictHostKeyChecking=yes \
+  "$PRIMARY_USER@$SERVER_ADDRESS" true \
   || die "SSH-проверка после hardening не прошла"
 
-echo "[5/7] Проверяем UFW"
-ssh -o BatchMode=yes -o StrictHostKeyChecking=no "$PRIMARY_USER@$SERVER_ADDRESS" \
+echo "[5/8] Проверяем UFW"
+ssh -o BatchMode=yes -o UserKnownHostsFile="$KNOWN_HOSTS_FILE" -o StrictHostKeyChecking=yes "$PRIMARY_USER@$SERVER_ADDRESS" \
   'sudo ufw status verbose'
 
-echo "[6/7] Проверяем fail2ban и auditd"
-ssh -o BatchMode=yes -o StrictHostKeyChecking=no "$PRIMARY_USER@$SERVER_ADDRESS" \
+echo "[6/8] Проверяем fail2ban и auditd"
+ssh -o BatchMode=yes -o UserKnownHostsFile="$KNOWN_HOSTS_FILE" -o StrictHostKeyChecking=yes "$PRIMARY_USER@$SERVER_ADDRESS" \
   'systemctl is-active fail2ban; systemctl is-active auditd'
 
-echo "[7/7] Настройка завершена"
+echo "[7/8] Host key сохранён только во временном файле и удалён после завершения"
+echo "[8/8] Настройка завершена"
 echo "Подключение: ssh $PRIMARY_USER@$SERVER_ADDRESS"
