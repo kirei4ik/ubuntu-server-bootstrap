@@ -21,12 +21,7 @@ common:
     - chrony
     - logrotate
     - rsync
-    - restic
-    - software-properties-common
-    - apt-transport-https
     - ca-certificates
-    - gnupg
-    - lsb-release
   
   extra_packages: []
   
@@ -62,10 +57,10 @@ common:
   
   # Управление системным hostname сервера.
   # При set_hostname: true роль common установит hostname через Ansible-модуль
-  # hostname. По умолчанию берём имя хоста из inventory.yaml, то есть ключ
+  # hostname. По умолчанию берём имя хоста из inventory, то есть ключ
   # слева под hosts: web-prod-01, db-prod-01 и т.п.
   #
-  # Если текущий hostname на сервере отличается, при запуске playbook_prepare.yaml
+  # Если текущий hostname на сервере отличается, при запуске bootstrap.sh
   # он будет изменён на это значение. Чтобы не менять hostname, установите
   # set_hostname: false. Чтобы задать имя отдельно от inventory_hostname,
   # переопределите common.hostname в host_vars/<inventory_hostname>/vars.yml.
@@ -75,7 +70,7 @@ common:
   configure_hosts: true
   hosts_entries:
     - "127.0.0.1 localhost"
-    - "127.0.1.1 {{ common.hostname | default(inventory_hostname) }} {{ common.hostname | default(inventory_hostname) }}.local"
+    - "127.0.1.1 {{ bootstrap_hostname | default(common.hostname | default(inventory_hostname)) }} {{ bootstrap_hostname | default(common.hostname | default(inventory_hostname)) }}.local"
     - "::1 ip6-localhost ip6-loopback"
     - "fe00::0 ip6-localnet"
     - "ff00::0 ip6-mcastprefix"
@@ -348,12 +343,6 @@ security:
       - port: "{{ security.ssh.port }}"
         proto: "tcp"
         comment: "SSH доступ"
-      - port: "80"
-        proto: "tcp"
-        comment: "HTTP"
-      - port: "443"
-        proto: "tcp"
-        comment: "HTTPS"
     rate_limit:
       enabled: true
       port: "{{ security.ssh.port }}"

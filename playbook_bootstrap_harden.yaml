@@ -1,0 +1,37 @@
+---
+- name: Bootstrap — финальное применение безопасности
+  hosts: all
+  become: true
+  gather_facts: true
+  vars:
+    security_stage: activate
+  pre_tasks:
+    - name: Проверить Ubuntu 22.04+
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.distribution == 'Ubuntu'
+          - ansible_facts.distribution_major_version | int >= 22
+        fail_msg: "Требуется Ubuntu 22.04+. Найдено: {{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }}"
+    - name: Проверить наличие bootstrap-пользователей
+      ansible.builtin.assert:
+        that:
+          - bootstrap_users is defined
+          - bootstrap_users | length > 0
+          - bootstrap_users[0].name | length > 0
+        fail_msg: "Не передан список пользователей bootstrap"
+  roles:
+    - security
+  post_tasks:
+    - name: Проверить активный UFW
+      ansible.builtin.command: ufw status
+      register: bootstrap_ufw_status
+      changed_when: false
+    - name: Проверить активный fail2ban
+      ansible.builtin.command: systemctl is-active fail2ban
+      register: bootstrap_fail2ban_status
+      changed_when: false
+    - name: Показать результат
+      ansible.builtin.debug:
+        msg:
+          - "UFW: {{ bootstrap_ufw_status.stdout }}"
+          - "fail2ban: {{ bootstrap_fail2ban_status.stdout }}"

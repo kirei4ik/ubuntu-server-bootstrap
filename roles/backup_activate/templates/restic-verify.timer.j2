@@ -1,9 +1,0 @@
-[Unit]
-Description=Restic weekly verify timer
-
-[Timer]
-OnCalendar={{ backup.restic.schedule.weekly | default('Sun 03:00') }}
-Persistent=true
-
-[Install]
-WantedBy=timers.target

@@ -1,0 +1,19 @@
+---
+- name: Bootstrap — базовая подготовка сервера
+  hosts: all
+  become: true
+  gather_facts: true
+  vars:
+    security_stage: prepare
+  pre_tasks:
+    - name: Проверить Ubuntu 22.04+
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.distribution == 'Ubuntu'
+          - ansible_facts.distribution_major_version | int >= 22
+        fail_msg: "Требуется Ubuntu 22.04+. Найдено: {{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }}"
+  roles:
+    - common
+    - security
+    - logging
+    - kernel

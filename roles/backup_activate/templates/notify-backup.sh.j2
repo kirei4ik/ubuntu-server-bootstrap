@@ -1,7 +1,0 @@
-#!/bin/bash
-# Уведомления о бэкапах (stub)
-# Можно дополнить: отправка email, telegram и т.д.
-
-NOTIFY_MSG="$1"
-logger -t restic-notify "$NOTIFY_MSG"
-echo "$NOTIFY_MSG" | wall -n 2>/dev/null || true

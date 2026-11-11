@@ -70,12 +70,6 @@ security:
       - port: "{{ security.ssh.port }}"
         proto: "tcp"
         comment: "SSH доступ"
-      - port: "80"
-        proto: "tcp"
-        comment: "HTTP"
-      - port: "443"
-        proto: "tcp"
-        comment: "HTTPS"
     
     # Дополнительные ограничения
     rate_limit:

@@ -1,9 +1,0 @@
-[Unit]
-Description=Restic daily backup timer
-
-[Timer]
-OnCalendar={{ backup.restic.schedule.daily | default('04:00') }}
-Persistent=true
-
-[Install]
-WantedBy=timers.target

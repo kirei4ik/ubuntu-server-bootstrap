@@ -1,6 +1,6 @@
 ---
 # Playbook для настройки мониторинга (node_exporter)
-# Можно запускать отдельно после playbook_prepare.yaml + playbook_activate.yaml
+# Запускается отдельно после успешного bootstrap.sh с maintenance inventory.
 #
 # Запуск:
 #   ansible-playbook playbook_monitoring.yaml --ask-vault-pass

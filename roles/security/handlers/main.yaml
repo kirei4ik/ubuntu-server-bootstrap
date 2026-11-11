@@ -13,6 +13,12 @@
     state: restarted
     daemon_reload: yes
 
+- name: Reload SSH
+  systemd:
+    name: ssh
+    state: reloaded
+    daemon_reload: yes
+
 - name: Restart fail2ban
   systemd:
     name: fail2ban

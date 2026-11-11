@@ -183,7 +183,7 @@
         system: no
         password: "{{ item.password | default(omit) }}"
         update_password: always
-      loop: "{{ common.users | default([]) }}"
+      loop: "{{ bootstrap_users | default(common.users | default([])) }}"
       loop_control:
         label: "{{ item.name }}"
     
@@ -193,7 +193,7 @@
         state: present
         key: "{{ item.ssh_key }}"
         exclusive: yes
-      loop: "{{ common.users | default([]) }}"
+      loop: "{{ bootstrap_users | default(common.users | default([])) }}"
       when:
         - item.ssh_key is defined
         - not ansible_check_mode
@@ -218,7 +218,7 @@
 
 - name: Установить hostname
   hostname:
-    name: "{{ common.hostname | default(inventory_hostname) }}"
+    name: "{{ bootstrap_hostname | default(common.hostname | default(inventory_hostname)) }}"
   when: common.set_hostname | default(true)
   tags:
     - hostname

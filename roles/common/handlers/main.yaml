@@ -19,7 +19,7 @@
     creates: /etc/locale.gen
   
 - name: Update system hostname
-  command: hostnamectl set-hostname "{{ common.hostname }}"
+  command: hostnamectl set-hostname "{{ bootstrap_hostname | default(common.hostname) }}"
   when: common.set_hostname
   
 - name: Reload system limits

@@ -16,7 +16,6 @@ common:
     - chrony
     - logrotate
     - rsync
-    - restic
     - software-properties-common
     - apt-transport-https
     - ca-certificates
@@ -73,7 +72,7 @@ common:
   
   # Настройка системного hostname.
   # По умолчанию hostname сервера равен inventory_hostname — имени хоста
-  # в inventory.yaml слева под hosts. Если фактический hostname отличается,
+  # во временном или maintenance inventory слева под hosts. Если фактический hostname отличается,
   # роль common изменит его на это значение при set_hostname: true.
   set_hostname: true
   hostname: "{{ inventory_hostname }}"

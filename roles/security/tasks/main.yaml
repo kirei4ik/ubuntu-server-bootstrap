@@ -14,7 +14,7 @@
     - name: Сделать бэкап текущего sshd_config
       copy:
         src: /etc/ssh/sshd_config
-        dest: /etc/ssh/sshd_config.backup.{{ ansible_date_time.date }}_{{ ansible_date_time.time }}
+        dest: /etc/ssh/sshd_config.bootstrap.backup
         remote_src: yes
         owner: root
         group: root
@@ -32,8 +32,8 @@
       with_items:
         - { regexp: 'Port\s+', line: 'Port {{ security.ssh.port }}' }
         - { regexp: 'Protocol\s+', line: 'Protocol {{ security.ssh.protocol }}' }
-        - { regexp: 'PermitRootLogin\s+', line: 'PermitRootLogin {{ "no" if security.ssh.disable_root else "yes" }}' }
-        - { regexp: 'PasswordAuthentication\s+', line: 'PasswordAuthentication {{ "yes" if security.ssh.password_auth else "no" }}' }
+        - { regexp: 'PermitRootLogin\s+', line: 'PermitRootLogin {{ "no" if security_stage == "activate" and security.ssh.disable_root else "yes" }}' }
+        - { regexp: 'PasswordAuthentication\s+', line: 'PasswordAuthentication {{ "yes" if security_stage == "prepare" else ("yes" if security.ssh.password_auth else "no") }}' }
         - { regexp: 'PermitEmptyPasswords\s+', line: 'PermitEmptyPasswords {{ "yes" if security.ssh.permit_empty_passwords else "no" }}' }
         - { regexp: 'ChallengeResponseAuthentication\s+', line: 'ChallengeResponseAuthentication no' }
         - { regexp: 'UsePAM\s+', line: 'UsePAM {{ "yes" if security.ssh.use_pam else "no" }}' }
@@ -48,7 +48,7 @@
         - { regexp: 'MaxSessions\s+', line: 'MaxSessions {{ security.ssh.max_sessions }}' }
         - { regexp: 'LogLevel\s+', line: 'LogLevel {{ security.ssh.log_level }}' }
         - { regexp: 'UseDNS\s+', line: 'UseDNS {{ "yes" if security.ssh.use_dns else "no" }}' }
-      notify: Restart SSH
+      notify: Reload SSH
 
     - name: Настроить SSH - криптография
       lineinfile:
@@ -61,7 +61,7 @@
         - { regexp: 'KexAlgorithms\s+', line: 'KexAlgorithms {{ security.ssh.kex_algorithms }}' }
         - { regexp: 'Ciphers\s+', line: 'Ciphers {{ security.ssh.ciphers }}' }
         - { regexp: 'MACs\s+', line: 'MACs {{ security.ssh.macs }}' }
-      notify: Restart SSH
+      notify: Reload SSH
 
     - name: Настроить SSH - разрешенные пользователи
       lineinfile:
@@ -70,7 +70,7 @@
         line: "AllowUsers {{ security.ssh.allow_users | join(' ') }}"
         state: "{{ 'present' if security.ssh.allow_users | length > 0 else 'absent' }}"
         create: no
-      notify: Restart SSH
+      notify: Reload SSH
 
     - name: Настроить SSH - разрешенные группы
       lineinfile:
@@ -79,7 +79,7 @@
         line: "AllowGroups {{ security.ssh.allow_groups | join(' ') }}"
         state: "{{ 'present' if security.ssh.allow_groups | length > 0 else 'absent' }}"
         create: no
-      notify: Restart SSH
+      notify: Reload SSH
 
     - name: Настроить SSH - запретить аутентификацию по паролю для root
       lineinfile:
@@ -88,8 +88,8 @@
         line: 'AuthenticationMethods publickey'
         state: present
         create: no
-      when: not security.ssh.password_auth
-      notify: Restart SSH
+      when: security_stage == 'activate' and not security.ssh.password_auth
+      notify: Reload SSH
 
     - name: Удалить устаревшие параметры
       lineinfile:
@@ -105,13 +105,13 @@
         - '^KeyRegenerationInterval'
         - '^ServerKeyBits'
         - '^StrictModes'
-      notify: Restart SSH
+      notify: Reload SSH
 
     - name: Проверить синтаксис sshd_config
       command: sshd -t
       register: sshd_test
       changed_when: false
-      ignore_errors: yes
+      failed_when: false
 
     - name: Показать ошибки sshd_config если есть
       debug:
@@ -120,7 +120,7 @@
 
     - name: Откатить sshd_config при ошибке
       copy:
-        src: "/etc/ssh/sshd_config.backup.{{ ansible_date_time.date }}_{{ ansible_date_time.time }}"
+        src: /etc/ssh/sshd_config.bootstrap.backup
         dest: /etc/ssh/sshd_config
         remote_src: yes
         owner: root
@@ -128,26 +128,29 @@
         mode: '0644'
       when: sshd_test.rc != 0 and security.ssh.backup_config
 
+    - name: Остановить настройку при ошибке SSH после отката
+      ansible.builtin.fail:
+        msg: "Некорректный sshd_config: {{ sshd_test.stderr }}"
+      when: sshd_test.rc != 0
+
     - name: Перезапустить SSH
       systemd:
         name: ssh
         state: restarted
         daemon_reload: yes
-      when: sshd_test.rc == 0
-      tags: [ 'never', 'security_activate' ]  # НЕ перезапускать при подготовке!
+      when: security_stage == 'activate' and sshd_test.rc == 0
   tags:
     - ssh
-    - security_prepare  # Меняем тег: только подготовка
     - security
 
 - name: ====== ВНИМАНИЕ ======
   debug:
     msg: |
-      ⚠️  SSH настроен, но НЕ перезапущен!
+      ✅ SSH-конфигурация подготовлена без отключения root и паролей.
       ⚠️  Фаервол настроен, но НЕ включен!
-      Проверьте доступ и запустите security_activate.
+      Сначала проверьте вход под новым администратором, затем запускайте hardening.
+  when: security_stage == 'prepare'
   tags:
-    - security_prepare
     - info
 
 - name: ====== НАСТРОЙКА ФАЕРВОЛА (UFW) ======
@@ -192,7 +195,7 @@
         port: "{{ item.port }}"
         proto: "{{ item.proto | default('tcp') }}"
         comment: "{{ item.comment | default('') }}"
-      with_items: "{{ security.firewall.rules }}"
+      with_items: "{{ bootstrap_firewall_rules | default(security.firewall.rules) }}"
       notify: Reload UFW
 
     - name: Настроить rate limiting для SSH
@@ -213,8 +216,7 @@
     - name: Включить UFW
       ufw:
         state: enabled
-      ignore_errors: yes
-      tags: [ 'never', 'security_activate' ]
+      when: security_stage == 'activate'
   tags:
     - ufw
     - firewall
@@ -265,8 +267,7 @@
         enabled: yes
         state: started
         daemon_reload: yes
-      ignore_errors: yes
-      tags: [ 'never', 'security_activate' ]
+      when: security_stage == 'activate'
   tags:
     - fail2ban
     - security
@@ -361,8 +362,7 @@
         enabled: yes
         state: started
         daemon_reload: yes
-      ignore_errors: yes
-      tags: [ 'never', 'security_activate' ]
+      when: security_stage == 'activate'
   tags:
     - auditd
     - security
