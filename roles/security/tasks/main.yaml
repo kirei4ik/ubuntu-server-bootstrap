@@ -21,6 +21,31 @@
         mode: '0600'
       when: security.ssh.backup_config
 
+    - name: Удалить старый SSH drop-in bootstrap
+      file:
+        path: /etc/ssh/sshd_config.d/99-bootstrap-hardening.conf
+        state: absent
+      notify: Reload SSH
+
+    - name: Настроить приоритетный SSH drop-in
+      copy:
+        dest: /etc/ssh/sshd_config.d/00-bootstrap-hardening.conf
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          # Managed by Ansible bootstrap. Overrides provider/cloud-init SSH defaults.
+          Port {{ security.ssh.port }}
+          PermitRootLogin {{ "no" if security_stage == "activate" and security.ssh.disable_root else "yes" }}
+          PasswordAuthentication {{ "yes" if security_stage == "prepare" else ("yes" if security.ssh.password_auth else "no") }}
+          PubkeyAuthentication yes
+          KbdInteractiveAuthentication no
+          PermitEmptyPasswords {{ "yes" if security.ssh.permit_empty_passwords else "no" }}
+          {% if security_stage == "activate" and not security.ssh.password_auth %}
+          AuthenticationMethods publickey
+          {% endif %}
+      notify: Reload SSH
+
     - name: Настроить SSH - основные параметры
       lineinfile:
         path: /etc/ssh/sshd_config
