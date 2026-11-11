@@ -41,6 +41,7 @@ save_input_state() {
   local state_tmp="${STATE_FILE}.tmp.$$"
   declare -p SERVER_ADDRESS ROOT_USER ROOT_PASSWORD SERVER_HOSTNAME \
     PRIMARY_USER PRIMARY_KEY USERS_YAML USERS_SUMMARY FIREWALL_RULES FIREWALL_SUMMARY \
+    BOOTSTRAP_STEP \
     >"$state_tmp"
   chmod 600 "$state_tmp"
   mv -f "$state_tmp" "$STATE_FILE"
@@ -58,6 +59,16 @@ if [[ -f "$STATE_FILE" ]]; then
   if [[ ! "${RESUME_CONFIRM:-Y}" =~ ^([nN]|[nN][oO])$ ]]; then
     # The file is created by this script with mode 0600 in a mode 0700 directory.
     source "$STATE_FILE"
+    if [[ -z "${BOOTSTRAP_STEP:-}" ]]; then
+      echo "Это сохранение создано старой версией bootstrap без checkpoint-этапов."
+      read -r -p "Подготовка сервера уже завершилась успешно? [y/N]: " PREPARE_DONE
+      if [[ "${PREPARE_DONE:-N}" =~ ^([yY]|[yY][eE][sS])$ ]]; then
+        BOOTSTRAP_STEP="prepare_done"
+      else
+        BOOTSTRAP_STEP="input_saved"
+      fi
+      save_input_state
+    fi
     RESUME_STATE=true
   else
     rm -f "$STATE_FILE"
@@ -143,6 +154,7 @@ if [[ "$RESUME_STATE" == false ]]; then
     esac
   done
 
+  BOOTSTRAP_STEP="input_saved"
   save_input_state
   echo "Введённые данные сохранены во временный файл для возможности продолжить."
 fi
@@ -218,17 +230,25 @@ EOF
 read -r -p "Начать настройку? [y/N]: " CONFIRM
 [[ "${CONFIRM:-N}" =~ ^([yY]|[yY][eE][sS])$ ]] || { echo "Настройка отменена."; exit 0; }
 
-echo "[1/8] Подготавливаем сервер и создаём пользователей"
-ANSIBLE_HOST_KEY_CHECKING=True ANSIBLE_SSH_ARGS="-o UserKnownHostsFile=$KNOWN_HOSTS_FILE -o StrictHostKeyChecking=yes" ansible-playbook \
-  -i "$INVENTORY_FILE" \
-  "$PROJECT_DIR/playbook_bootstrap_prepare.yaml" \
-  -e "@$VARS_FILE"
+if [[ "$BOOTSTRAP_STEP" == "input_saved" ]]; then
+  echo "[1/8] Подготавливаем сервер и создаём пользователей"
+  ANSIBLE_HOST_KEY_CHECKING=True ANSIBLE_SSH_ARGS="-o UserKnownHostsFile=$KNOWN_HOSTS_FILE -o StrictHostKeyChecking=yes" ansible-playbook \
+    -i "$INVENTORY_FILE" \
+    "$PROJECT_DIR/playbook_bootstrap_prepare.yaml" \
+    -e "@$VARS_FILE"
+  BOOTSTRAP_STEP="prepare_done"
+  save_input_state
+fi
 
-echo "[2/8] Проверяем SSH-вход под $PRIMARY_USER"
-ssh -o BatchMode=yes -o ConnectTimeout=10 -o PasswordAuthentication=no \
-  -o UserKnownHostsFile="$KNOWN_HOSTS_FILE" -o StrictHostKeyChecking=yes \
-  "$PRIMARY_USER@$SERVER_ADDRESS" true \
-  || die "не удалось войти под $PRIMARY_USER. Проверьте, что соответствующий приватный ключ доступен ssh-agent или стандартному SSH-клиенту"
+if [[ "$BOOTSTRAP_STEP" == "prepare_done" ]]; then
+  echo "[2/8] Проверяем SSH-вход под $PRIMARY_USER"
+  ssh -o BatchMode=yes -o ConnectTimeout=10 -o PasswordAuthentication=no \
+    -o UserKnownHostsFile="$KNOWN_HOSTS_FILE" -o StrictHostKeyChecking=yes \
+    "$PRIMARY_USER@$SERVER_ADDRESS" true \
+    || die "не удалось войти под $PRIMARY_USER. Проверьте, что соответствующий приватный ключ доступен ssh-agent или стандартному SSH-клиенту"
+  BOOTSTRAP_STEP="admin_login_done"
+  save_input_state
+fi
 
 cat >"$INVENTORY_FILE" <<EOF
 all:
@@ -239,25 +259,41 @@ all:
       ansible_port: 22
 EOF
 
-echo "[3/8] Применяем SSH hardening, UFW и security-сервисы"
-ANSIBLE_HOST_KEY_CHECKING=True ANSIBLE_SSH_ARGS="-o UserKnownHostsFile=$KNOWN_HOSTS_FILE -o StrictHostKeyChecking=yes" ansible-playbook \
-  -i "$INVENTORY_FILE" \
-  "$PROJECT_DIR/playbook_bootstrap_harden.yaml" \
-  -e "@$VARS_FILE"
+if [[ "$BOOTSTRAP_STEP" == "admin_login_done" ]]; then
+  echo "[3/8] Применяем SSH hardening, UFW и security-сервисы"
+  ANSIBLE_HOST_KEY_CHECKING=True ANSIBLE_SSH_ARGS="-o UserKnownHostsFile=$KNOWN_HOSTS_FILE -o StrictHostKeyChecking=yes" ansible-playbook \
+    -i "$INVENTORY_FILE" \
+    "$PROJECT_DIR/playbook_bootstrap_harden.yaml" \
+    -e "@$VARS_FILE"
+  BOOTSTRAP_STEP="harden_done"
+  save_input_state
+fi
 
-echo "[4/8] Проверяем доступ под $PRIMARY_USER после hardening"
-ssh -o BatchMode=yes -o ConnectTimeout=10 -o PasswordAuthentication=no \
-  -o UserKnownHostsFile="$KNOWN_HOSTS_FILE" -o StrictHostKeyChecking=yes \
-  "$PRIMARY_USER@$SERVER_ADDRESS" true \
-  || die "SSH-проверка после hardening не прошла"
+if [[ "$BOOTSTRAP_STEP" == "harden_done" ]]; then
+  echo "[4/8] Проверяем доступ под $PRIMARY_USER после hardening"
+  ssh -o BatchMode=yes -o ConnectTimeout=10 -o PasswordAuthentication=no \
+    -o UserKnownHostsFile="$KNOWN_HOSTS_FILE" -o StrictHostKeyChecking=yes \
+    "$PRIMARY_USER@$SERVER_ADDRESS" true \
+    || die "SSH-проверка после hardening не прошла"
+  BOOTSTRAP_STEP="post_harden_verified"
+  save_input_state
+fi
 
-echo "[5/8] Проверяем UFW"
-ssh -o BatchMode=yes -o UserKnownHostsFile="$KNOWN_HOSTS_FILE" -o StrictHostKeyChecking=yes "$PRIMARY_USER@$SERVER_ADDRESS" \
-  'sudo ufw status verbose'
+if [[ "$BOOTSTRAP_STEP" == "post_harden_verified" ]]; then
+  echo "[5/8] Проверяем UFW"
+  ssh -o BatchMode=yes -o UserKnownHostsFile="$KNOWN_HOSTS_FILE" -o StrictHostKeyChecking=yes "$PRIMARY_USER@$SERVER_ADDRESS" \
+    'sudo ufw status verbose'
+  BOOTSTRAP_STEP="ufw_verified"
+  save_input_state
+fi
 
-echo "[6/8] Проверяем fail2ban и auditd"
-ssh -o BatchMode=yes -o UserKnownHostsFile="$KNOWN_HOSTS_FILE" -o StrictHostKeyChecking=yes "$PRIMARY_USER@$SERVER_ADDRESS" \
-  'systemctl is-active fail2ban; systemctl is-active auditd'
+if [[ "$BOOTSTRAP_STEP" == "ufw_verified" ]]; then
+  echo "[6/8] Проверяем fail2ban и auditd"
+  ssh -o BatchMode=yes -o UserKnownHostsFile="$KNOWN_HOSTS_FILE" -o StrictHostKeyChecking=yes "$PRIMARY_USER@$SERVER_ADDRESS" \
+    'systemctl is-active fail2ban; systemctl is-active auditd'
+  BOOTSTRAP_STEP="security_verified"
+  save_input_state
+fi
 
 rm -f "$STATE_FILE"
 echo "[7/8] Host key сохранён только во временном файле и удалён после завершения"
