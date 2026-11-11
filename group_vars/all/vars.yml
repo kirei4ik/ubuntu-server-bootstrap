@@ -1,9 +1,11 @@
 # Глобальные переменные для всех хостов
 # Все значения можно переопределить на уровне хоста или группы
 #
-# ⚠️ СЕКРЕТНЫЕ ДАННЫЕ хранятся в group_vars/all/vault.yml (ansible-vault)
+# ⚠️ СЕКРЕТНЫЕ ДАННЫЕ храните в Ansible Vault: host_vars/<host>/vault.yml или group_vars/*/vault.yml.
 
 # ==================== ОБЩИЕ НАСТРОЙКИ ====================
+admin_ssh_public_key_file: "~/.ssh/id_ed25519.pub"
+
 common:
   # Основные пакеты для установки
   base_packages:
@@ -46,7 +48,7 @@ common:
   
   users:
     - name: "bestadmin"
-      ssh_key: "{{ vault_admin_ssh_key }}"
+      ssh_key: "{{ lookup('file', admin_ssh_public_key_file) }}"
       groups: ["sudo"]
       shell: "/bin/bash"
   
@@ -58,13 +60,22 @@ common:
       - user: "root"
         rule: "ALL=(ALL:ALL) ALL"
   
+  # Управление системным hostname сервера.
+  # При set_hostname: true роль common установит hostname через Ansible-модуль
+  # hostname. По умолчанию берём имя хоста из inventory.yaml, то есть ключ
+  # слева под hosts: web-prod-01, db-prod-01 и т.п.
+  #
+  # Если текущий hostname на сервере отличается, при запуске playbook_prepare.yaml
+  # он будет изменён на это значение. Чтобы не менять hostname, установите
+  # set_hostname: false. Чтобы задать имя отдельно от inventory_hostname,
+  # переопределите common.hostname в host_vars/<inventory_hostname>/vars.yml.
   set_hostname: true
   hostname: "{{ inventory_hostname }}"
   
   configure_hosts: true
   hosts_entries:
     - "127.0.0.1 localhost"
-    - "127.0.1.1 {{ ansible_hostname }} {{ ansible_hostname }}.local"
+    - "127.0.1.1 {{ common.hostname | default(inventory_hostname) }} {{ common.hostname | default(inventory_hostname) }}.local"
     - "::1 ip6-localhost ip6-loopback"
     - "fe00::0 ip6-localnet"
     - "ff00::0 ip6-mcastprefix"
@@ -110,7 +121,7 @@ common:
   
   chrony:
     enabled: true
-    service_name: "{{ 'chronyd' if ansible_facts.distribution_major_version | int >= 24 else 'chrony' }}"
+    service_name: "chrony"
     ntp_servers:
       - "pool.ntp.org"
       - "time.google.com"
@@ -145,9 +156,8 @@ kernel:
       net.core.rmem_default: 262144
       net.core.wmem_default: 262144
       net.core.optmem_max: 655360
-      net.ipv4.ip_forward: 0
-      net.ipv4.conf.all.rp_filter: 1
-      net.ipv4.conf.default.rp_filter: 1
+      net.ipv4.conf.all.rp_filter: 2
+      net.ipv4.conf.default.rp_filter: 2
       net.ipv4.conf.all.accept_source_route: 0
       net.ipv4.conf.default.accept_source_route: 0
       net.ipv4.conf.all.accept_redirects: 0
@@ -158,8 +168,6 @@ kernel:
       net.ipv4.conf.default.send_redirects: 0
       net.ipv4.icmp_echo_ignore_broadcasts: 1
       net.ipv4.icmp_ignore_bogus_error_responses: 1
-      net.ipv6.conf.all.accept_ra: 0
-      net.ipv6.conf.default.accept_ra: 0
       net.ipv6.conf.all.accept_redirects: 0
       net.ipv6.conf.default.accept_redirects: 0
     vm:
@@ -194,7 +202,6 @@ kernel:
       kernel.unprivileged_bpf_disabled: 1
     misc:
       dev.tty.ldisc_autoload: 0
-      user.max_user_namespaces: 0
   
   ulimits:
     global:
@@ -331,6 +338,7 @@ security:
 
   firewall:
     enabled: true
+    reset_rules: false
     default_incoming: "deny"
     default_outgoing: "allow"
     default_routed: "deny"
@@ -346,9 +354,6 @@ security:
       - port: "443"
         proto: "tcp"
         comment: "HTTPS"
-      - port: "53"
-        proto: "udp"
-        comment: "DNS"
     rate_limit:
       enabled: true
       port: "{{ security.ssh.port }}"
@@ -377,6 +382,7 @@ security:
 
   apparmor:
     enabled: true
+    configure_grub: false
     mode: "enforce"
     profiles:
       - "usr.sbin.sshd"

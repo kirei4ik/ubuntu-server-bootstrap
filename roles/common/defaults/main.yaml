@@ -71,7 +71,10 @@ common:
       - user: "root"
         rule: "ALL=(ALL:ALL) ALL"
   
-  # Настройка hostname
+  # Настройка системного hostname.
+  # По умолчанию hostname сервера равен inventory_hostname — имени хоста
+  # в inventory.yaml слева под hosts. Если фактический hostname отличается,
+  # роль common изменит его на это значение при set_hostname: true.
   set_hostname: true
   hostname: "{{ inventory_hostname }}"
   
@@ -133,8 +136,7 @@ common:
   # Настройка NTP (chrony)
   chrony:
     enabled: true
-    # Ubuntu 24.04+: служба chronyd, до 24.04: chrony
-    service_name: "{{ 'chronyd' if ansible_facts.distribution_major_version | int >= 24 else 'chrony' }}"
+    service_name: "chrony"
     ntp_servers:
       - "pool.ntp.org"
       - "time.google.com"

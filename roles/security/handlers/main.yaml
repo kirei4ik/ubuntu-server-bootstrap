@@ -40,7 +40,7 @@
 
 - name: Restart chrony
   systemd:
-    name: "{{ 'chronyd' if ansible_facts.distribution_major_version | int >= 24 else 'chrony' }}"
+    name: "{{ common.chrony.service_name | default('chrony') }}"
     state: restarted
     daemon_reload: yes
   ignore_errors: yes

@@ -10,9 +10,12 @@ rotate 4
 # Создавать новые (пустые) файлы после ротации
 create
 
+# Ротировать логи от root:adm даже если /var/log доступен группе syslog.
+# Без этого logrotate на Ubuntu может падать с "insecure permissions".
+su root adm
+
 # Сжимать архивные файлы
 compress
 
 # Пакеты могут сбрасывать свои настройки сюда
 include /etc/logrotate.d
-

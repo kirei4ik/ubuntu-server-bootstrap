@@ -57,6 +57,8 @@ security:
   # Фаервол (UFW)
   firewall:
     enabled: true
+    # false keeps existing UFW rules intact; set true only for a fresh server.
+    reset_rules: false
     default_incoming: "deny"
     default_outgoing: "allow"
     default_routed: "deny"
@@ -74,9 +76,6 @@ security:
       - port: "443"
         proto: "tcp"
         comment: "HTTPS"
-      - port: "53"
-        proto: "udp"
-        comment: "DNS"
     
     # Дополнительные ограничения
     rate_limit:
@@ -124,6 +123,8 @@ security:
   # AppArmor
   apparmor:
     enabled: true
+    # Ubuntu normally enables AppArmor already. Leave GRUB untouched by default.
+    configure_grub: false
     mode: "enforce"  # enforce, complain, disable
     # Профили для включения
     profiles:

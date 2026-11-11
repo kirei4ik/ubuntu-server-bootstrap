@@ -35,6 +35,20 @@
     - packages
     - extra
 
+- name: Сбросить SSH соединение после установки пакетов
+  meta: reset_connection
+  tags:
+    - packages
+    - ssh
+
+- name: Дождаться доступности SSH после установки пакетов
+  wait_for_connection:
+    timeout: 60
+    sleep: 2
+  tags:
+    - packages
+    - ssh
+
 - name: Обновить систему (если включено)
   apt:
     upgrade: "{{ 'dist' if (common.upgrade_packages | default(true)) else 'yes' }}"
@@ -180,7 +194,9 @@
         key: "{{ item.ssh_key }}"
         exclusive: yes
       loop: "{{ common.users | default([]) }}"
-      when: item.ssh_key is defined
+      when:
+        - item.ssh_key is defined
+        - not ansible_check_mode
       loop_control:
         label: "{{ item.name }}"
   tags:

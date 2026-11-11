@@ -1,734 +1,409 @@
-# Ubuntu Server Setup 2026 - Ansible Playbook
+# Ubuntu Server Setup 2026 — Ansible Playbook
 
-Универсальный плейбук для первичной настройки серверов Ubuntu 22.04 с акцентом на безопасность, управление логами и современные требования 2026 года.
+Универсальный плейбук для первичной настройки Ubuntu Server 22.04+: пользователь с sudo, SSH-ключ, безопасность (UFW, fail2ban, AppArmor, auditd), логи, оптимизация ядра. Опционально — мониторинг и бэкапы.
 
-## 🚨 КРИТИЧЕСКИ ВАЖНО: МЕРЫ ПРЕДОСТОРОЖНОСТИ
+Все команды ниже используют **плейсхолдеры** — подставляйте свои значения:
 
-**ПЕРЕД ЗАПУСКОМ УБЕДИТЕСЬ, ЧТО:**
-
-1. ✅ **У вас есть SSH доступ** (по ключу ИЛИ по root-паролю — оба работают!)
-2. ✅ **Есть резервный доступ** (консоль управления, IPMI, KVM, VNC) — на всякий случай
-3. ✅ **Вы знаете root-пароль сервера** (если входите по паролю)
-
-### 🔄 Двухэтапный процесс:
-
-**ЭТАП 1 (Подготовка):** Заходим под **root** (то что есть сейчас)
-- playbook_prepare.yaml создаст пользователя `bestadmin` 
-- Скопирует ваш SSH ключ с Mac на сервер
-- **НЕ отключит root** (еще можно зайти)
-
-**ЭТАП 2 (Активация):** Заходим под **bestadmin** (создан в Этапе 1)
-- playbook_activate.yaml отключит root
-- Включит фаервол
-- **Только теперь root заблокирован**
-
-### 🔧 Подготовка перед запуском:
-
-```bash
-# 1. Убедитесь что можете зайти на сервер (любым способом)
-ssh root@сервер          # или
-ssh -i ~/.ssh/id_rsa root@сервер
-
-# 2. Получите ваш публичный ключ с Mac (для group_vars/all/vault.yml)
-cat ~/.ssh/id_ed25519.pub  # или: cat ~/.ssh/id_rsa.pub
-# Скопируйте вывод — это ваш vault_admin_ssh_key
-
-# 3. Сделайте бэкап конфигураций (на всякий случай)
-sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup.$(date +%Y%m%d)
-sudo cp /etc/ufw/ufw.conf /etc/ufw/ufw.conf.backup.$(date +%Y%m%d)
-```
-
-### ⚠️ ВАЖНО: Inventory меняется между этапами!
-
-```yaml
-# inventory.yaml — ЭТАП 1 (подготовка):
-ansible_user: root           # ← Есть сейчас
-# ansible_ssh_pass: ваш-пароль  # ← Если входите по паролю (не ключу)
-
-# inventory.yaml — ЭТАП 2 (активация):
-# Поменяйте root → bestadmin ПОСЛЕ успешного playbook_prepare.yaml!
-ansible_user: bestadmin      # ← Создан в prepare
-```
-
-```bash
-ansible-playbook playbook_prepare.yaml --check --diff --ask-vault-pass
-```
+| Плейсхолдер | Что подставить |
+|---|---|
+| `<SERVER>` | Имя хоста в `inventory.yaml` (станет hostname сервера), напр. `web01` |
+| `<SERVER_IP>` | Публичный IP сервера, напр. `1.2.3.4` |
+| `<SSH_USER>` | Пользователь для входа на Этапе 1 (обычно `root`) |
+| `<VAULT_PASSWORD>` | Ваш пароль для шифрования секретов |
+| `<RESTIC_PASSWORD>` | Пароль для restic-репозитория (генерируется) |
 
 ---
 
-## 📋 Что делает этот плейбук?
+## ⚠️ Меры предосторожности
 
-### 🔐 **Безопасность (Security)**
-| Сервис | Простыми словами | Зачем нужен |
-|--------|------------------|-------------|
-| **UFW (Firewall)** | Цифровой шлагбаум | Блокирует все порты кроме разрешённых (SSH, HTTP, HTTPS) |
-| **fail2ban** | Охранник у двери | Банит IP после нескольких неудачных попыток входа |
-| **AppArmor** | Клетка для программ | Не даёт программе делать то, что не разрешено |
-| **SSH Hardening** | Усиленная дверь | Запрещает вход под root, требует ключи вместо паролей |
-| **auditd** | Камера наблюдения | Записывает кто и что делал в системе |
+Перед работой с боевым сервером убедитесь, что:
 
-### 📊 **Управление логами (Logging)**
-| Сервис | Простыми словами | Зачем нужен |
-|--------|------------------|-------------|
-| **logrotate** | Уборщик логов | Автоматически сжимает и удаляет старые логи |
-| **journald** | Журнал событий | Собирает все логи в одном месте |
-| **Ограничение логов** | Контроль диска | Не даёт логам занять весь диск |
+1. У вас есть SSH-доступ к серверу (по паролю на Этапе 1 — этого достаточно).
+2. Есть резервный доступ (консоль хостинга, IPMI, KVM) — на случай блокировки SSH.
+3. Вы знаете пароль `root` (или пользователя из `<SSH_USER>`).
 
-### ⚙️ **Оптимизация системы (Kernel)**
-| Сервис | Простыми словами | Зачем нужен |
-|--------|------------------|-------------|
-| **sysctl** | Настройки "под капотом" | Оптимизирует работу сети и памяти |
-| **ulimits** | Лимиты ресурсов | Ограничивает процессы пользователей |
-| **swap** | Виртуальная память | Дополнительная память на диске |
-
-### 📈 **Мониторинг (Monitoring)** — опционально, запускается отдельно
-| Сервис | Простыми словами | Зачем нужен |
-|--------|------------------|-------------|
-| **node_exporter** | Датчики системы | Собирает метрики CPU, памяти, диска по HTTP порту 9100 (для Prometheus/Grafana) |
-| **health-check.sh** | Врач системы | Каждые 15 мин проверяет диск, память, CPU, SSH и пишет в лог |
-| **Netdata** | Веб-дашборд | Реальное время — графики в браузере на порту 19999 (включается вручную) |
-
-### 💾 **Бэкапы (Backup)** — опционально, запускается отдельно
-| Сервис | Простыми словами | Зачем нужен |
-|--------|------------------|-------------|
-| **restic** | Фотограф системы | Делает снимки состояния системы |
-| **Шифрование** | Замок на архиве | Защищает бэкапы от чтения |
-| **Верификация** | Проверка фото | Убеждается что фото не испорчено |
-| **Systemd timer** | Будильник | Автоматически делает бэкап каждый день в 04:00 |
+> Этап 2 (`activate`) **перезапускает SSH и включает фаервол**. Не запускайте его, пока не убедились, что вход под `bestadmin` по ключу работает.
 
 ---
 
-## 🚀 Быстрый старт
+## 1. Подготовка репозитория к новому серверу
 
-### 1. Установите Ansible (на управляющей машине)
+### 1.1 Установка Ansible (на управляющей машине)
 
 ```bash
+# macOS
+brew install ansible
+
 # Ubuntu/Debian
-sudo apt update
-sudo apt install ansible git
-
-# Проверьте версию
-ansible --version
+sudo apt update && sudo apt install -y ansible
 ```
 
-### 2. Клонируйте репозиторий
+### 1.2 Что где настраивается
 
-```bash
-git clone <ваш-репозиторий>
-cd ubuntu-server-setup-2026
-```
+| Файл/папка | Что здесь указывается |
+|---|---|
+| `inventory.yaml` | Серверы: имя, IP, пользователь, порт |
+| `group_vars/all/vars.yml` | Общая конфигурация для всех серверов (пакеты, SSH, фаервол, логи, ядро) |
+| `host_vars/<SERVER>/vars.yml` | Переопределение конфигурации для конкретного сервера (опционально) |
+| `group_vars/all/vault.yml` | Зашифрованные секреты, общие для всех серверов |
+| `host_vars/<SERVER>/vault.yml` | Зашифрованные секреты конкретного сервера (напр. `ansible_password`) |
 
-### 3. Настройте инвентори
+### 1.3 inventory.yaml — что указать
 
-Отредактируйте `inventory.yaml`:
+Добавьте сервер в группу (например `production`):
 
 ```yaml
 all:
-  hosts:
-    ваш-сервер:
-      ansible_host: 192.168.1.100
-      ansible_user: root              # ← под root при первом запуске!
-      ansible_port: 22
+  children:
+    production:
+      hosts:
+        <SERVER>:                    # ← имя, станет hostname
+          ansible_host: <SERVER_IP>  # ← IP сервера
+          ansible_user: <SSH_USER>   # ← Этап 1: root; после prepare: bestadmin
+          ansible_port: 22
 ```
 
-### 4. Создайте файл с секретами
+> **ВАЖНО.** Пароль в `inventory.yaml` не пишите. На Этапе 1 пароль вводится вручную (`--ask-pass`) либо лежит зашифрованным в `host_vars/<SERVER>/vault.yml` как `ansible_password`.
+
+### 1.4 group_vars/all/vars.yml — основные переменные
+
+Ключевые места, которые чаще всего меняются:
+
+```yaml
+admin_ssh_public_key_file: "~/.ssh/id_ed25519.pub"   # ваш публичный SSH-ключ
+
+common:
+  users:
+    - name: "bestadmin"               # пользователь с sudo, создаётся на Этапе 1
+      ssh_key: "{{ lookup('file', admin_ssh_public_key_file) }}"
+      groups: ["sudo"]
+      shell: "/bin/bash"
+
+security:
+  ssh:
+    port: 22
+    disable_root: false               # Этап 1: root оставляем; активация решит
+    password_auth: true
+  firewall:
+    rules:
+      - port: "22"                    # SSH
+        proto: "tcp"
+        comment: "SSH доступ"
+      - port: "80"
+        proto: "tcp"
+        comment: "HTTP"
+      - port: "443"
+        proto: "tcp"
+        comment: "HTTPS"
+
+backup:
+  restic:
+    password: "{{ vault_restic_password }}"   # пароль restic берётся из vault
+```
+
+### 1.5 Секреты: что создавать и шифровать
+
+**Когда vault не нужен.** Для этапов `prepare` и `activate` секретов в vault не требуется:
+пароль на Этапе 1 вводится интерактивно (`--ask-pass`), а с Этапа 2 вход идёт по SSH-ключу.
+
+**Когда vault обязателен.** Для `playbook_backup.yaml` нужна переменная `vault_restic_password`
+(на неё ссылается `group_vars/all/vars.yml`). Без неё запуск бэкапов упадёт.
+
+Создание секрета:
 
 ```bash
-# Скопируйте пример
+# 1. Общий для всех серверов
+mkdir -p group_vars/all
 cp group_vars/all/vault.yml.example group_vars/all/vault.yml
 
-# Отредактируйте vault.yml (ваши реальные данные)
-vim group_vars/all/vault.yml
-
-# Содержимое vault.yml:
-# vault_admin_ssh_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI..."
-# vault_restic_password: "ваш-пароль-из-bitwarden"
-# vault_admin_email: "ваш@email.com"
-
-# Зашифруйте файл
+# 2. Заполните значения, затем зашифруйте
 ansible-vault encrypt group_vars/all/vault.yml
-# Введите пароль из Bitwarden
+# введите <VAULT_PASSWORD>
 ```
 
-### 5. Настройте конфигурацию
+Секрет, уникальный для одного сервера (например, пароль root для первого входа):
 
 ```bash
-# Скопируйте пример
-cp group_vars/all.yaml.example group_vars/all.yaml
-
-# Отредактируйте group_vars/all.yaml
-vim group_vars/all.yaml
+mkdir -p host_vars/<SERVER>
+ansible-vault create host_vars/<SERVER>/vault.yml
 ```
 
-### 6. Запустите в тестовом режиме
+Внутри файла:
 
-```bash
-# Проверить без изменений
-ansible-playbook playbook_prepare.yaml --check --diff --ask-vault-pass
+```yaml
+ansible_password: "<ROOT_PASSWORD>"   # пароль только этого сервера
 ```
 
-### 7. Запустите подготовку
+Редактирование: `ansible-vault edit host_vars/<SERVER>/vault.yml`
+Просмотр: `ansible-vault view host_vars/<SERVER>/vault.yml`
+
+---
+
+## 2. Плейбуки и их состав
+
+### 2.1 Плейбуки
+
+| Плейбук | Роли | Что делает | Когда запускать |
+|---|---|---|---|
+| `playbook_prepare.yaml` | `common`, `security`, `logging`, `kernel` | **Этап 1.** Пользователь `bestadmin` + SSH-ключ, пакеты и обновления, SSH-конфиг (без перезапуска), правила UFW (без включения), логи, ядро. Безопасен — root и фаервол не трогаются | Первый запуск на новом сервере, под `root` |
+| `playbook_activate.yaml` | `security_activate` | **Этап 2.** Перезапуск SSH, включение UFW, fail2ban, AppArmor, auditd, sysctl hardening | После успешного prepare и проверки SSH, под `bestadmin` |
+| `playbook_monitoring.yaml` | `monitoring` | node_exporter, health-check, smartmontools | Опционально, после activate |
+| `playbook_backup.yaml` | `backup`, `backup_activate` | restic, репозиторий, шифрование, systemd-таймеры | Опционально, после activate (требует vault) |
+| `playbook.yaml` | `common`, `security`, `logging`, `kernel` | То же, что prepare, но с предупреждением и перезагрузкой в конце | Не рекомендуется — используйте prepare/activate |
+
+### 2.2 Роли (функции)
+
+| Роль | Функции | Теги для запуска по отдельности |
+|---|---|---|
+| `common` | пользователь + SSH-ключ, пакеты, обновления, locale, часовой пояс, hostname, sudo, motd, bash/vim, chrony, очистка | `users`, `ssh`, `packages`, `update`, `upgrade`, `hostname`, `timezone`, `locale`, `chrony`, `sudo`, `motd`, `cleanup` |
+| `security` | SSH-конфиг (без перезапуска), UFW-правила (без включения), fail2ban-конфиг, AppArmor-профили, auditd-правила, sysctl | `ssh`, `ufw`, `fail2ban`, `apparmor`, `audit`, `sysctl`, `security`, `security_prepare` |
+| `security_activate` | перезапуск SSH, включение UFW/fail2ban/AppArmor/auditd, sysctl hardening | `ssh`, `ufw`, `fail2ban`, `apparmor`, `auditd`, `sysctl`, `check` |
+| `logging` | logrotate, journald, rsyslog, очистка логов | `logrotate`, `journald`, `rsyslog`, `cleanup`, `logging`, `check` |
+| `kernel` | sysctl-параметры, ulimits, swap, io-планировщики | `sysctl`, `kernel`, `check`, `verify` |
+| `monitoring` | node_exporter, netdata, health-check, smartmontools | `node_exporter`, `netdata`, `health_checks`, `disk`, `monitoring`, `check` |
+| `backup` | restic, репозиторий, шифрование, скрипты | `restic`, `repository`, `encryption`, `age`, `storage`, `backup`, `check` |
+| `backup_activate` | systemd-таймеры, cron, скрипты бэкапа | `timers`, `cron`, `scripts`, `repository`, `password`, `check` |
+
+---
+
+## 3. Действия
+
+### 3.0 Проверка состояния сервера без изменений (dry-run)
+
+Любой плейбук можно прогнать в **безопасном режиме проверки**: ничего не меняется,
+Ansible лишь показывает, **отличается ли текущее состояние сервера от того, что
+описывает плейбук**, и что именно он хотел бы изменить.
+
+- `--check` — симуляция: Ansible «прикидывает», что сделает, но не вносит изменений.
+- `--diff` — показывает конкретные отличия (изменённые строки/файлы на сервере).
 
 ```bash
-ansible-playbook playbook_prepare.yaml --ask-vault-pass
+ansible-playbook <PLAYBOOK>.yaml -l <SERVER> --check --diff
 ```
 
-### 8. Проверьте SSH доступ
+Если для этапа нужен пароль, добавляйте его флаг:
 
 ```bash
-# Обязательно проверьте!
-ssh -i ~/.ssh/id_ed25519 bestadmin@ВАШ_СЕРВЕР
+ansible-playbook playbook_prepare.yaml -l <SERVER> --check --diff --ask-pass     # по паролю
+ansible-playbook playbook_backup.yaml -l <SERVER> --check --diff --ask-vault-pass
+```
+
+Повторный запуск реальной команды, при котором ничего не изменилось, означает, что
+сервер уже соответствует плейбуку (идемпотентность). Так удобно проверять расхождение
+состояния сервера и конфигурации.
+
+### 3.1 Этап 1 — prepare (первый запуск сервера)
+
+Под **root**, пароль вводится интерактивно (нигде не хранится):
+
+```bash
+ansible-playbook playbook_prepare.yaml -l <SERVER> --ask-pass
+```
+
+> `--ask-pass` = Ansible спросит SSH-пароль `<SSH_USER>` в консоли. Секреты создавать не нужно.
+
+Безопасная проверка (ничего не меняет):
+
+```bash
+ansible-playbook playbook_prepare.yaml -l <SERVER> --check --diff --ask-pass
+```
+
+Если пароль лежит в vault (`host_vars/<SERVER>/vault.yml`), вместо `--ask-pass`:
+
+```bash
+ansible-playbook playbook_prepare.yaml -l <SERVER> --ask-vault-pass
+```
+
+**Что произойдёт:** создастся пользователь `bestadmin`, скопируется ваш SSH-ключ из
+`~/.ssh/id_ed25519.pub`, установятся пакеты, подготовятся SSH/UFW (без применения).
+
+### 3.2 Проверка SSH после prepare (обязательно!)
+
+```bash
+ssh -i ~/.ssh/id_ed25519 bestadmin@<SERVER_IP>
 sudo ls /
 ```
 
-### 9. Поменяйте inventory.yaml (ВАЖНО!)
+Если вход не работает — **не переходите к активации**. Исправьте и повторите prepare.
 
-```bash
-# Отредактируйте inventory.yaml
-vim inventory.yaml
+### 3.3 Переключить inventory на bestadmin (обязательно!)
 
-# Замените:
-# ansible_user: root  →  ansible_user: bestadmin
-# Уберите: ansible_ssh_pass (если был)
+В `inventory.yaml` замените пользователя у сервера:
+
+```yaml
+<SERVER>:
+  ansible_host: <SERVER_IP>
+  ansible_user: bestadmin     # ← было root
+  ansible_port: 22
 ```
 
-### 10. Запустите активацию
+### 3.4 Этап 2 — activate (включение безопасности)
+
+Под `bestadmin`, вход по SSH-ключу — **никаких флагов пароля не нужно**.
+
+**Обязательно сначала безопасная проверка** (ничего не меняет, покажет, что будет
+применено):
 
 ```bash
-ansible-playbook playbook_activate.yaml --ask-vault-pass
+ansible-playbook playbook_activate.yaml -l <SERVER> --check --diff
 ```
 
-### 11. (Опционально) Настройте мониторинг
+Изучите вывод — какие изменения планируются. Затем реальный запуск:
 
 ```bash
-ansible-playbook playbook_monitoring.yaml --check --diff --ask-vault-pass
-ansible-playbook playbook_monitoring.yaml --ask-vault-pass
+ansible-playbook playbook_activate.yaml -l <SERVER>
 ```
 
-Проверка:
-```bash
-# На сервере — метрики node_exporter
-curl http://localhost:9100/metrics
+**Что произойдёт:** перезапуск SSH, включение UFW, fail2ban, AppArmor, auditd.
+root будет заблокирован в SSH.
 
-# Скрипт проверки здоровья
-sudo /usr/local/sbin/health-check.sh
+> Если здесь появляется `[ERROR]: Attempting to decrypt but no vault secrets found.` — см. раздел 4.
+
+Проверка после активации:
+
+```bash
+ssh -i ~/.ssh/id_ed25519 bestadmin@<SERVER_IP>
+sudo ufw status verbose
+sudo fail2ban-client status
+sudo apparmor_status
 ```
 
-### 12. (Опционально) Настройте бэкапы
+### 3.5 Этап 3 — мониторинг (опционально)
 
 ```bash
-ansible-playbook playbook_backup.yaml --check --diff --ask-vault-pass
-ansible-playbook playbook_backup.yaml --ask-vault-pass
+ansible-playbook playbook_monitoring.yaml -l <SERVER> --check --diff
+ansible-playbook playbook_monitoring.yaml -l <SERVER>
 ```
 
-Проверка:
+Проверка: `curl http://localhost:9100/metrics`
+
+### 3.6 Этап 4 — бэкапы (опционально, требует vault)
+
 ```bash
-# На сервере
-sudo systemctl status restic-backup.timer
-sudo restic snapshots --repo /backup/repository --password-file /etc/backup/restic-password
+# если group_vars/all/vault.yml ещё не создан — сделайте по разделу 1.5
+ansible-playbook playbook_backup.yaml -l <SERVER> --check --diff --ask-vault-pass
+ansible-playbook playbook_backup.yaml -l <SERVER> --ask-vault-pass
+```
+
+Проверка: `sudo systemctl status restic-backup.timer` и `sudo restic snapshots --repo /backup/repository --password-file /etc/backup/restic-password`
+
+### 3.7 Запуск отдельных функций (ролей/тегов)
+
+`--tags` запускает только указанную функцию (список — в разделе 2.2):
+
+```bash
+# Только пользователи и SSH-ключи
+ansible-playbook playbook_prepare.yaml -l <SERVER> --tags "users" --ask-pass
+
+# Только sysctl-настройки ядра
+ansible-playbook playbook_prepare.yaml -l <SERVER> --tags "sysctl" --ask-pass
+
+# Только логи
+ansible-playbook playbook_prepare.yaml -l <SERVER> --tags "logging" --ask-pass
+
+# Активация только фаервола
+ansible-playbook playbook_activate.yaml -l <SERVER> --tags "ufw"
+
+# Активация только fail2ban
+ansible-playbook playbook_activate.yaml -l <SERVER> --tags "fail2ban"
 ```
 
 ---
 
-## 📁 Структура проекта
+## 4. Troubleshooting
+
+### 4.1 `[ERROR]: Attempting to decrypt but no vault secrets found.`
+
+**Причина:** в `host_vars/<SERVER>/vault.yml` (или `group_vars/all/vault.yml`) лежит
+зашифрованный секрет (например `ansible_password`), а запуск сделан без пароля от vault.
+
+**Решение (варианты):**
+- Запустите с паролем vault: добавьте `--ask-vault-pass`.
+- Либо удалите ненужный vault-файл и используйте вход по ключу/`--ask-pass`:
+
+```bash
+rm -rf host_vars/<SERVER>/vault.yml
+```
+
+### 4.2 `Connection to <IP> closed.` после prepare
+
+**Причины:**
+- Вход идёт как `root`, но SSH-конфиг уже изменён. Переключите `ansible_user: bestadmin`
+  (prepare создал этого пользователя с ключом) и попробуйте снова.
+- Виноват ControlMaster из `ansible.cfg` — старые соединения «залипли»:
+
+```bash
+# убить кэшированные SSH-соединения Ansible
+rm -f /tmp/ansible-ssh-*
+```
+
+- Если не помогает — проверьте конфиг SSH на сервере через консоль хостинга:
+
+```bash
+sudo sshd -t
+sudo systemctl restart ssh
+```
+
+### 4.3 `ansible-playbook` просит vault password
+
+```bash
+# Если файл ещё не зашифрован:
+ansible-vault encrypt group_vars/all/vault.yml
+
+# Или используйте файл с паролем:
+echo "<VAULT_PASSWORD>" > .vault_pass
+chmod 600 .vault_pass
+ansible-playbook playbook_backup.yaml --vault-password-file .vault_pass
+```
+
+### 4.4 SSH-доступ потерян после активации
+
+Через консоль хостинга:
+
+```bash
+sudo ufw allow 22/tcp
+sudo ufw disable   # временно
+sudo fail2ban-client set sshd unbanip <ВАШ_IP>
+sudo systemctl restart ssh
+```
+
+### 4.5 Не найден публичный ключ `~/.ssh/id_ed25519.pub`
+
+```bash
+# Сгенерируйте ключ, если его нет:
+ssh-keygen -t ed25519 -C "ваш@email.com"
+
+# Или укажите другой путь в group_vars/all/vars.yml:
+# admin_ssh_public_key_file: "~/.ssh/id_rsa.pub"
+```
+
+---
+
+## 5. Структура проекта
 
 ```
 ubuntu-server-setup-2026/
-├── ansible.cfg            # Конфигурация Ansible
-├── inventory.yaml         # Описание серверов
-├── playbook_prepare.yaml  # Этап 1: Подготовка (безопасно)
-├── playbook_activate.yaml # Этап 2: Активация (безопасность!)
-├── playbook_monitoring.yaml  # Опционально: мониторинг (node_exporter)
-├── playbook_backup.yaml   # Опционально: бэкапы (restic)
-├── playbook.yaml          # Полный плейбук (все роли разом)
+├── ansible.cfg             # конфигурация Ansible (SSH, become, paths)
+├── inventory.yaml          # серверы: имя, IP, пользователь
+├── playbook_prepare.yaml   # Этап 1: подготовка (безопасно)
+├── playbook_activate.yaml  # Этап 2: активация безопасности
+├── playbook_monitoring.yaml# опционально: мониторинг
+├── playbook_backup.yaml    # опционально: бэкапы
+├── playbook.yaml           # полный плейбук (не рекомендуется)
 ├── group_vars/
-│   ├── all.yaml           # Ваша конфигурация
-│   ├── all.yaml.example   # Пример конфигурации
 │   └── all/
-│       ├── vault.yml          # Зашифрованные секреты
-│       └── vault.yml.example  # Шаблон секретов
-├── host_vars/             # Уникальные секреты для конкретных серверов
-│   └── webserver-prod/
-│       └── vault.yml
-├── roles/
-│   ├── common/            # Базовая настройка (пользователи, пакеты)
-│   ├── security/          # Подготовка безопасности (НЕ активация)
-│   ├── security_activate/ # Активация SSH, UFW, fail2ban
-│   ├── logging/           # Управление логами
-│   ├── kernel/            # Оптимизация ядра (sysctl, limits)
-│   ├── monitoring/        # 📊 Мониторинг — запускается отдельно
-│   ├── backup/            # 💾 Бэкапы — запускается отдельно
-│   └── backup_activate/   # Активация restic таймеров
-└── tests/
-    └── test-playbook.yaml
+│       ├── vars.yml            # общая конфигурация
+│       └── vault.yml.example   # шаблон секретов (скопировать → заполнить → зашифровать)
+├── host_vars/
+│   └── <SERVER>/
+│       └── vault.yml           # секреты конкретного сервера (опционально)
+└── roles/
+    ├── common/             # пользователь, пакеты, обновления, hostname
+    ├── security/           # подготовка безопасности (без применения)
+    ├── security_activate/  # включение SSH/UFW/fail2ban/AppArmor/auditd
+    ├── logging/            # logrotate, journald, rsyslog
+    ├── kernel/             # sysctl, ulimits, swap
+    ├── monitoring/         # node_exporter, netdata
+    ├── backup/             # restic
+    └── backup_activate/    # таймеры и cron бэкапов
 ```
-
----
-
-## 👥 КАСТОМИЗАЦИЯ: Пользователи и пароли
-
-### Workflow:
-1. **Секреты** → `group_vars/all/vault.yml` (зашифровать vault)
-2. **Конфигурация** → `group_vars/all.yaml` (ссылается на секреты)
-3. **Запуск** → `ansible-playbook --ask-vault-pass`
-
-### Изменить имя пользователя по умолчанию:
-
-```yaml
-# group_vars/all.yaml
-system:
-  users:
-    - name: "yourname"           # ← ИЗМЕНИТЕ ЗДЕСЬ
-      ssh_key: "{{ vault_admin_ssh_key }}"
-      groups: ["sudo"]
-      shell: "/bin/bash"
-```
-
-### Добавить несколько пользователей:
-
-```yaml
-# 1. Добавьте ключи в group_vars/all/vault.yml:
-vault_admin_ssh_key: "ssh-ed25519 AAA..."
-vault_developer_ssh_key: "ssh-rsa AAA..."
-vault_monitoring_ssh_key: "ssh-ed25519 AAA..."
-
-# 2. Настройте пользователей в group_vars/all.yaml:
-system:
-  users:
-    - name: "bestadmin"
-      ssh_key: "{{ vault_admin_ssh_key }}"
-      groups: ["sudo"]
-      shell: "/bin/bash"
-    
-    - name: "developer"
-      ssh_key: "{{ vault_developer_ssh_key }}"  # ← новый ключ
-      groups: ["sudo", "docker"]
-      shell: "/bin/zsh"
-    
-    - name: "monitoring"
-      ssh_key: "{{ vault_monitoring_ssh_key }}"
-      groups: ["sudo", "adm"]
-      shell: "/bin/bash"
-```
-
-### Использовать пароли вместо ключей (НЕ рекомендуется!):
-
-```bash
-# Сгенерируйте хеш пароля (на сервере или Mac):
-mkpasswd --method=SHA-512 ваш_пароль
-# → $6$rounds=656000$salt$hash...
-
-# Добавьте в group_vars/all/vault.yml:
-vault_user_password: "$6$rounds=656000$salt$hash..."
-
-# Используйте в group_vars/all.yaml:
-system:
-  users:
-    - name: "admin"
-      password: "{{ vault_user_password }}"   # ← пароль вместо ключа
-      groups: ["sudo"]
-```
-
-### Изменить SSH порт:
-
-```yaml
-# group_vars/all.yaml
-security:
-  ssh:
-    port: 2222                    # ← новый порт
-    disable_root: true
-    password_auth: false
-```
-
-### Добавить правила фаервола:
-
-```yaml
-# group_vars/all.yaml
-security:
-  firewall:
-    rules:
-      - port: "2222"              # ← если поменяли SSH порт
-        proto: "tcp"
-        comment: "SSH custom"
-      - port: "8080"                # ← дополнительный порт
-        proto: "tcp"
-        comment: "Custom app"
-```
-
----
-
-## ⚙️ Настройка переменных
-
-### Основные переменные для настройки:
-
-1. **Пользователи и доступ** (`group_vars/all.yaml`):
-   ```yaml
-   system:
-     users:
-       - name: "admin"
-         ssh_key: "{{ vault_admin_ssh_key }}"
-         groups: ["sudo"]
-   ```
-
-2. **Безопасность SSH**:
-   ```yaml
-   security:
-     ssh:
-       port: 22                    # Порт SSH
-       disable_root: true          # Запретить вход root
-       password_auth: false        # Только по ключам
-   ```
-
-3. **Фаервол**:
-   ```yaml
-   security:
-     firewall:
-       rules:
-         - port: "22"
-           proto: "tcp"
-           comment: "SSH"
-         - port: "80"
-           proto: "tcp"
-           comment: "HTTP"
-         - port: "443"
-           proto: "tcp"
-           comment: "HTTPS"
-   ```
-
-4. **Логи**:
-   ```yaml
-   logging:
-     journald:
-       system_max_use: "500M"    # Максимум 500MB для логов
-     logrotate:
-       maxsize: "100M"           # Максимальный размер файла лога
-       rotate: 7                 # Хранить 7 архивов
-   ```
-
-5. **Бэкапы**:
-   ```yaml
-   backup:
-     enabled: true
-     include:
-       directories:
-         - "/etc"
-         - "/home/*/.ssh"
-         - "/root/.ssh"
-   ```
-
----
-
-## 🔧 Расширенное использование
-
-### Запуск отдельных ролей
-
-```bash
-# Только безопасность
-ansible-playbook playbook_prepare.yaml --tags "security"
-
-# Только логи
-ansible-playbook playbook_prepare.yaml --tags "logging"
-
-# Отдельно мониторинг (не через prepare)
-ansible-playbook playbook_monitoring.yaml --tags "node_exporter"
-
-# Отдельно бэкапы (не через prepare)
-ansible-playbook playbook_backup.yaml --tags "scripts"
-```
-
-### Проверка конкретного хоста
-
-```bash
-ansible-playbook playbook_prepare.yaml -l ваш-сервер --check --diff --ask-vault-pass
-```
-
-### Сухой запуск (без изменений)
-
-```bash
-ansible-playbook playbook_prepare.yaml --check --diff --ask-vault-pass
-```
-
-### Просмотр переменных
-
-```bash
-ansible-inventory -i inventory.yaml --list
-ansible-inventory -i inventory.yaml --host ваш-сервер
-```
-
----
-
-## 🏗️ Масштабирование: несколько серверов
-
-Когда добавится второй сервер, используйте **автоматический поиск Ansible**:
-
-```
-group_vars/
-├── all/
-│   └── vault.yml          ← общие секреты для ВСЕХ (SSH-ключ админа, email)
-├── production/
-│   └── vault.yml          ← секреты группы production (restic-пароль)
-├── staging/
-│   └── vault.yml          ← секреты группы staging (другой restic-пароль)
-host_vars/
-├── webserver-prod/
-│   └── vault.yml          ← уникальные секреты только для этого сервера
-└── dbserver-prod/
-    └── vault.yml          ← уникальные секреты для БД
-```
-
-**Ansible автоматически** подгружает нужный vault в зависимости от хоста/группы. Никаких `vars_files` в плейбуках прописывать не нужно.
-
-### Когда что использовать:
-| Случай | Куда класть |
-|--------|-------------|
-| Один и тот же SSH-ключ на все сервера | `group_vars/all/vault.yml` |
-| Разный restic-пароль для prod и staging | `group_vars/production/vault.yml` vs `group_vars/staging/vault.yml` |
-| Уникальный токен только на одном сервере | `host_vars/имя_хоста/vault.yml` |
-| На сервере БД другие SSH-ключи | `host_vars/dbserver/vault.yml` (переопределит групповой) |
-
-### Добавление нового сервера (пошагово):
-
-```bash
-# 1. Добавьте сервер в inventory.yaml
-vim inventory.yaml
-
-# 2. Если у него уникальные секреты — создайте папку:
-mkdir -p host_vars/newserver
-
-# 3. Скопируйте и отредактируйте:
-cp group_vars/all/vault.yml host_vars/newserver/vault.yml
-ansible-vault edit host_vars/newserver/vault.yml
-
-# 4. Запустите на конкретном сервере:
-ansible-playbook playbook_prepare.yaml -l newserver --ask-vault-pass
-```
-
-### Разные пароли шифрования для разных сред:
-
-```bash
-# Зашифровать с меткой (vault-id):
-ansible-vault encrypt --vault-id prod group_vars/production/vault.yml
-ansible-vault encrypt --vault-id staging group_vars/staging/vault.yml
-
-# При запуске указать нужный пароль:
-ansible-playbook playbook_prepare.yaml --vault-id prod@prompt
-```
-
----
-
-## 🩺 TROUBLESHOOTING (Решение проблем)
-
-### Проблема 1: "SSH доступ потерян после активации"
-
-**Причина:** playbook_activate.yaml заблокировал root или ключи не работают.
-
-**Решение:**
-```bash
-# Через консоль управления (IPMI/KVM):
-sudo cp /etc/ssh/sshd_config.backup /etc/ssh/sshd_config
-sudo systemctl restart ssh
-
-# Или перезапустите с параметром PermitRootLogin yes:
-sudo sed -i 's/PermitRootLogin no/PermitRootLogin yes/' /etc/ssh/sshd_config
-sudo systemctl restart ssh
-```
-
----
-
-### Проблема 2: "ansible-playbook просит vault password"
-
-**Причина:** Файл vault.yml не зашифрован или забыли флаг.
-
-**Решение:**
-```bash
-# Если ещё не зашифрован:
-ansible-vault encrypt group_vars/all/vault.yml
-
-# При запуске укажите пароль:
-ansible-playbook playbook_prepare.yaml --ask-vault-pass
-
-# Или создайте файл с паролем (менее безопасно):
-echo "ваш-пароль" > .vault_pass
-chmod 600 .vault_pass
-ansible-playbook playbook_prepare.yaml --vault-password-file .vault_pass
-```
-
----
-
-### Проблема 3: "Restic init запрашивает пароль интерактивно"
-
-**Причина:** Репозиторий не инициализирован или пароль неправильный.
-
-**Решение:**
-```bash
-# На сервере:
-sudo cat /etc/backup/restic-password   # Проверить файл с паролем
-sudo restic init --repo /backup/repository --password-file /etc/backup/restic-password
-
-# Если пароль не работает — сбросьте репозиторий:
-sudo rm -rf /backup/repository/*
-sudo restic init --repo /backup/repository --password-file /etc/backup/restic-password
-```
-
----
-
-### Проблема 4: "Fail2ban забанил мой IP"
-
-**Причина:** Слишком много неудачных попыток входа.
-
-**Решение:**
-```bash
-# На сервере (через консоль):
-sudo fail2ban-client set sshd unbanip ВАШ_IP
-
-# Или остановите fail2ban:
-sudo systemctl stop fail2ban
-```
-
----
-
-### Проблема 5: "UFW заблокировал SSH порт"
-
-**Причина:** Неправильно настроены правила фаервола.
-
-**Решение:**
-```bash
-# Через консоль управления:
-sudo ufw disable
-sudo ufw reset
-sudo ufw default allow incoming
-sudo ufw allow 22/tcp
-sudo ufw enable
-```
-
----
-
-### Проблема 6: "Ошибка: vault_admin_ssh_key is undefined"
-
-**Причина:** Переменная из group_vars/all/vault.yml не найдена.
-
-**Решение:**
-```bash
-# 1. Проверьте vault.yml:
-ansible-vault view group_vars/all/vault.yml
-
-# 2. Убедитесь что vault_admin_ssh_key задан:
-grep vault_admin_ssh_key group_vars/all/vault.yml
-
-# 3. Если отсутствует — добавьте:
-# vault_admin_ssh_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI..."
-
-# 4. Перешифруйте:
-ansible-vault encrypt group_vars/all/vault.yml
-```
-
----
-
-### Проблема 7: "Permission denied при SSH подключении"
-
-**Причина:** Ключ не скопирован или неправильные права.
-
-**Решение:**
-```bash
-# На сервере (через root или консоль):
-sudo ls -la /home/bestadmin/.ssh/
-sudo cat /home/bestadmin/.ssh/authorized_keys
-
-# Если пусто — скопируйте ключ вручную:
-sudo mkdir -p /home/bestadmin/.ssh
-sudo chmod 700 /home/bestadmin/.ssh
-sudo bash -c 'echo "ssh-ed25519 AAA..." > /home/bestadmin/.ssh/authorized_keys'
-sudo chmod 600 /home/bestadmin/.ssh/authorized_keys
-sudo chown -R bestadmin:bestadmin /home/bestadmin/.ssh
-```
-
----
-
-## 📊 Проверка после установки
-
-После запуска плейбука проверьте:
-
-```bash
-# Проверьте SSH
-ssh user@server
-
-# Проверьте фаервол
-sudo ufw status verbose
-
-# Проверьте fail2ban
-sudo fail2ban-client status
-
-# Проверьте AppArmor
-sudo apparmor_status
-
-# Проверьте логи
-sudo journalctl --disk-usage
-sudo ls -la /var/log/
-
-# Проверьте бэкапы
-sudo restic snapshots --password-file /etc/backup/restic-password
-```
-
----
-
-## 🤝 Вклад в проект
-
-1. Форкните репозиторий
-2. Создайте ветку для вашей фичи
-3. Внесите изменения
-4. Напишите тесты
-5. Создайте Pull Request
-
----
-
-## 📄 Лицензия
-
-MIT License
-
----
-
-## ❓ FAQ
-
-**Q: Можно ли использовать на Ubuntu 20.04/24.04?**
-**A:** Да, но тестировалось на 22.04. Могут быть различия в версиях пакетов.
-
-**Q: Как отключить определённую функциональность?**
-**A:** Измените переменные в `group_vars/all.yaml`:
-```yaml
-backup:
-  enabled: false  # Отключить бэкапы
-
-monitoring:
-  node_exporter:
-    enabled: false  # Отключить мониторинг
-```
-
-**Q: Где хранятся секретные данные?**
-**A:** В `group_vars/all/vault.yml`, зашифрованном через Ansible Vault. Для уникальных секретов отдельных серверов используйте `host_vars/имя_хоста/vault.yml`.
-
-**Q: Как добавить свой сервис в мониторинг?**
-**A:** Добавьте коллектор в `monitoring.node_exporter.collectors.enabled`.
-
-**Q: Как настроить удалённое хранилище для бэкапов?**
-**A:** Включите `backup.remote_storage.enabled` и настройте параметры.
-
-**Q: Как изменить пользователя или пароль?**
-**A:** 
-1. Отредактируйте `group_vars/all.yaml` (имя пользователя)
-2. Отредактируйте `group_vars/all/vault.yml` (пароли, ключи)
-3. Зашифруйте `ansible-vault encrypt group_vars/all/vault.yml`
-4. Запустите `ansible-playbook playbook_prepare.yaml --ask-vault-pass`
-
----
-
-## 📞 Поддержка
-
-При возникновении проблем:
-1. Проверьте запуск в тестовом режиме: `--check --diff`
-2. Проверьте логи Ansible: добавить `-vvv`
-3. Убедитесь что есть резервный доступ к серверу
-4. Создайте issue в репозитории
-
----
-
-**ВАЖНО:** Этот плейбук вносит критические изменения в систему. Всегда тестируйте на тестовом окружении перед применением на production!

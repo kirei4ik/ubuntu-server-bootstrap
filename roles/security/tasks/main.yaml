@@ -160,6 +160,7 @@
     - name: Сбросить UFW (начать с чистого листа)
       ufw:
         state: reset
+      when: security.firewall.reset_rules | default(false)
       ignore_errors: yes
 
     - name: Установить политику по умолчанию
@@ -288,6 +289,7 @@
         line: 'GRUB_CMDLINE_LINUX_DEFAULT="apparmor=1 security=apparmor"'
         state: present
         create: no
+      when: security.apparmor.configure_grub | default(false)
       notify: Update grub
 
     - name: Обновить GRUB
@@ -387,6 +389,7 @@
         sysctl_set: yes
         state: present
         reload: yes
+        sysctl_file: /etc/sysctl.d/99-security.conf
         ignoreerrors: yes
       with_items:
         - { name: 'kernel.randomize_va_space', value: '2' }
@@ -397,8 +400,8 @@
         - { name: 'kernel.perf_event_paranoid', value: '2' }
         - { name: 'kernel.yama.ptrace_scope', value: '1' }
         - { name: 'net.ipv4.tcp_syncookies', value: '1' }
-        - { name: 'net.ipv4.conf.all.rp_filter', value: '1' }
-        - { name: 'net.ipv4.conf.default.rp_filter', value: '1' }
+        - { name: 'net.ipv4.conf.all.rp_filter', value: '2' }
+        - { name: 'net.ipv4.conf.default.rp_filter', value: '2' }
         - { name: 'net.ipv4.conf.all.accept_source_route', value: '0' }
         - { name: 'net.ipv4.conf.default.accept_source_route', value: '0' }
         - { name: 'net.ipv4.conf.all.accept_redirects', value: '0' }
@@ -411,8 +414,6 @@
         - { name: 'net.ipv4.icmp_ignore_bogus_error_responses', value: '1' }
         - { name: 'net.ipv4.tcp_timestamps', value: '1' }
         - { name: 'net.ipv4.tcp_rfc1337', value: '1' }
-        - { name: 'net.ipv6.conf.all.accept_ra', value: '0' }
-        - { name: 'net.ipv6.conf.default.accept_ra', value: '0' }
         - { name: 'net.ipv6.conf.all.accept_redirects', value: '0' }
         - { name: 'net.ipv6.conf.default.accept_redirects', value: '0' }
         - { name: 'fs.protected_hardlinks', value: '1' }

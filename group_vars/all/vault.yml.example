@@ -1,10 +1,16 @@
 # ============================================
 # Ansible Vault - СЕКРЕТНЫЕ ДАННЫЕ
 # ============================================
-# ⚠️  НЕ храните зашифрованные файлы в Git! ⚠️
+# ⚠️  Не храните НЕзашифрованные секреты в Git.
+# Зашифрованный vault.yml можно коммитить только если это осознанная политика проекта.
 #
-# ЭТОТ ФАЙЛ - ПРИМЕР. Скопируйте его и вставьте реальные данные:
-#   cp vault.yml.example vault.yml
+# ЭТОТ ФАЙЛ - ПРИМЕР.
+# Для общих секретов всех серверов:
+#   cp group_vars/all/vault.yml.example group_vars/all/vault.yml
+#
+# Для секретов конкретного сервера:
+#   mkdir -p host_vars/<host>
+#   cp group_vars/all/vault.yml.example host_vars/<host>/vault.yml
 #
 # Затем зашифруйте:
 #   ansible-vault encrypt vault.yml
@@ -15,20 +21,27 @@
 # Если нужно изменить:   ansible-vault edit vault.yml
 # Если нужно просмотреть: ansible-vault view vault.yml
 #
-# Ansible сам находит vault.yml в этой папке (group_vars/all/)
-# и подгружает переменные для всех хостов.
+# Ansible сам находит vault.yml в group_vars/* и host_vars/*.
 # ============================================
 
 # ====== SSH КЛЮЧИ ======
-# Получить на Mac: cat ~/.ssh/id_ed25519.pub (или id_rsa.pub)
-# Вставьте ВЕСЬ вывод команды (одной строкой)
-vault_admin_ssh_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... ваш@email.com"
-
-# Если нужны дополнительные пользователи:
+# Публичный ключ bestadmin по умолчанию НЕ хранится в vault.
+# Он читается локально из admin_ssh_public_key_file в group_vars/all/vars.yml.
+#
+# Если нужны дополнительные пользователи с переносимыми ключами:
 # vault_developer_ssh_key: "ssh-rsa AAAAB3NzaC1yc2... developer@company.com"
 # vault_monitoring_ssh_key: "ssh-ed25519 AAA... monitoring@system"
 
 # ====== ПАРОЛИ ======
+# Временный SSH-пароль root для первого запуска, если нет входа по ключу.
+# Лучше использовать уникальный пароль на сервер в host_vars/<host>/vault.yml:
+#   ansible_password: "root_пароль_этого_сервера"
+#
+# Если root-пароль общий для всех серверов, можно хранить его здесь и
+# ссылаться на него из inventory.yaml:
+#   ansible_password: "{{ vault_root_password }}"
+# vault_root_password: "root_пароль_для_первого_запуска"
+
 # Для restic бэкапов (из Bitwarden или сгенерируйте)
 vault_restic_password: "ваш_сгенерированный_пароль_из_bitwarden"
 
@@ -58,3 +71,14 @@ vault_admin_email: "ваш@email.com"
 # Backblaze B2 (если используете)
 # vault_b2_account_id: "your-account-id"
 # vault_b2_account_key: "your-account-key"
+
+# ====== ОПЦИОНАЛЬНО: МОНИТОРИНГ ======
+# vault_node_exporter_password: "basic-auth-password"
+# vault_prometheus_password: "remote-write-password"
+# vault_prometheus_token: "bearer-token"
+
+# ====== ОПЦИОНАЛЬНО: ШИФРОВАНИЕ БЭКАПОВ ======
+# vault_age_key: "AGE-SECRET-KEY-..."
+# vault_age_public_key: "age1..."
+# vault_gpg_key_id: "backup@example.com"
+# vault_gpg_passphrase: "gpg-passphrase"

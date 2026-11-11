@@ -34,9 +34,8 @@ kernel:
       net.core.optmem_max: 655360               # Максимум опциональной памяти
       
       # Безопасность сети
-      net.ipv4.ip_forward: 0                      # Отключить IP forwarding
-      net.ipv4.conf.all.rp_filter: 1                # Reverse path filtering
-      net.ipv4.conf.default.rp_filter: 1
+      net.ipv4.conf.all.rp_filter: 2              # Loose reverse path filtering
+      net.ipv4.conf.default.rp_filter: 2
       net.ipv4.conf.all.accept_source_route: 0     # Запрет source routing
       net.ipv4.conf.default.accept_source_route: 0
       net.ipv4.conf.all.accept_redirects: 0       # Запрет ICMP redirects
@@ -49,8 +48,6 @@ kernel:
       net.ipv4.icmp_ignore_bogus_error_responses: 1
       
       # IPv6 безопасность
-      net.ipv6.conf.all.accept_ra: 0              # Запрет Router Advertisement
-      net.ipv6.conf.default.accept_ra: 0
       net.ipv6.conf.all.accept_redirects: 0
       net.ipv6.conf.default.accept_redirects: 0
       
@@ -93,7 +90,6 @@ kernel:
     # Прочее
     misc:
       dev.tty.ldisc_autoload: 0                  # Запрет autoload line discipline
-      user.max_user_namespaces: 0                 # Запрет user namespaces (если не нужны)
       
   # Ulimits
   ulimits:
@@ -200,11 +196,9 @@ kernel:
     modules:
       - "pcspkr"                                  # System speaker (annoying)
       - "snd_pcsp"                                # PC speaker sound
-      - "ipv6"                                    # Если IPv6 не используется
       - "bluetooth"                               # Если Bluetooth не используется
       - "firewire-core"                           # Firewire (небезопасно)
       - "thunderbolt"                             # Thunderbolt (DMA атаки)
-      - "usb_storage"                             # Если USB не нужен
       
     # Загрузить модули
     load_modules:
