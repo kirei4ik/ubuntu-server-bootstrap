@@ -1,4 +1,4 @@
-# Ubuntu Server Setup
+# Ubuntu Server Bootstrap
 
 Интерактивный bootstrap для Ubuntu Server 22.04+.
 
