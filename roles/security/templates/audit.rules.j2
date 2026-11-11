@@ -132,6 +132,3 @@
 # Исключить системные процессы
 -a never,exit -F arch=b64 -S sched_yield -S getpid -S getppid -S getpgrp -S setsid
 -a never,exit -F arch=b64 -S futex -S epoll_wait -S poll -S select -S nanosleep -S clock_nanosleep
-
-# Исключить чтение файлов (только запись)
--a never,exit -F arch=b64 -S read -S readv -S pread64 -S preadv -S recvfrom -S recvmsg
