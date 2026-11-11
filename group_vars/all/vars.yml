@@ -84,10 +84,9 @@ common:
     #         УВАЖАЕМЫЙ ПОЛЬЗОВАТЕЛЬ!          #
     #############################################
     
-    ⚠️  Это защищённый сервер Ubuntu 24.04
+    🛡️ Базовая безопасность сервера настроена автоматически
     🔐 Доступ разрешён только авторизованным пользователям
-    📊 Мониторинг системы включён
-    💾 Автоматические бэкапы настроены
+    ℹ️ Monitoring и backup не входят в bootstrap
     
     📅 Последний вход: {{ ansible_date_time.date }}
     ⏰ Текущее время: {{ ansible_date_time.time }}
@@ -310,7 +309,6 @@ security:
     disable_root: true
     password_auth: false
     permit_empty_passwords: false
-    protocol: 2
     kex_algorithms: "curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group-exchange-sha256"
     ciphers: "chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr"
     macs: "hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,umac-128-etm@openssh.com"
@@ -414,19 +412,9 @@ security:
       - "-w /etc/shadow -p wa -k identity"
       - "-w /etc/group -p wa -k identity"
       - "-w /etc/gshadow -p wa -k identity"
-      - "-w /etc/sudoers -p wa -k sudoers"
-      - "-w /etc/sudoers.d/ -p wa -k sudoers"
-      - "-w /etc/ssh/ -p wa -k ssh"
-      - "-w /etc/ssh/sshd_config -p wa -k ssh"
-      - "-w /etc/pam.d/ -p wa -k pam"
-      - "-w /etc/security/ -p wa -k pam"
       - "-w /root -p wa -k root_access"
-      - "-w /tmp -p x -k tmp_execution"
-      - "-w /var/tmp -p x -k tmp_execution"
       - "-w /var/log/auth.log -p wa -k authentication"
       - "-w /var/log/lastlog -p wa -k logins"
-      - "-w /etc/apparmor/ -p wa -k apparmor"
-      - "-w /etc/apparmor.d/ -p wa -k apparmor"
       - "-a always,exit -F arch=b64 -S setuid -S setgid -S setreuid -S setregid -k privilege_escalation"
       - "-a always,exit -F arch=b64 -S chmod -S fchmod -S fchmodat -S chown -S fchown -S fchownat -S lchown -k file_permissions"
       - "-a always,exit -F arch=b64 -S execve -S execveat -k process_execution"

@@ -30,6 +30,11 @@
       ansible.builtin.command: systemctl is-active fail2ban
       register: bootstrap_fail2ban_status
       changed_when: false
+    - name: Проверить активный auditd
+      ansible.builtin.command: systemctl is-active auditd
+      register: bootstrap_auditd_status
+      changed_when: false
+      when: security.auditd.enabled | bool
     - name: Проверить эффективную SSH-конфигурацию
       ansible.builtin.command: sshd -T
       register: bootstrap_sshd_config
@@ -45,4 +50,5 @@
         msg:
           - "UFW: {{ bootstrap_ufw_status.stdout }}"
           - "fail2ban: {{ bootstrap_fail2ban_status.stdout }}"
+          - "auditd: {{ bootstrap_auditd_status.stdout | default('отключён') }}"
           - "SSH hardening: PermitRootLogin no, PasswordAuthentication no, PubkeyAuthentication yes, KbdInteractiveAuthentication no"

@@ -47,6 +47,29 @@ save_input_state() {
   mv -f "$state_tmp" "$STATE_FILE"
 }
 
+run_ansible_with_retry() {
+  local log_file="$TMP_DIR/ansible-attempt.log"
+  local attempt=1
+  local max_attempts=3
+
+  while (( attempt <= max_attempts )); do
+    if ANSIBLE_HOST_KEY_CHECKING=True \
+      ANSIBLE_SSH_ARGS="-o UserKnownHostsFile=$KNOWN_HOSTS_FILE -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=3 -o ControlMaster=auto -o ControlPersist=60s -o ControlPath=/tmp/ansible-ssh-%h-%p-%r" \
+      ansible-playbook "$@" 2>&1 | tee "$log_file"; then
+      return 0
+    fi
+
+    if (( attempt == max_attempts )) || \
+      ! grep -Eq 'UNREACHABLE|Failed to connect to the host via ssh|Connection refused|Connection timed out' "$log_file"; then
+      return 1
+    fi
+
+    echo "SSH-соединение временно прервано. Повторная попытка через 10 секунд ($((attempt + 1))/$max_attempts)..." >&2
+    sleep 10
+    attempt=$((attempt + 1))
+  done
+}
+
 command -v ansible-playbook >/dev/null 2>&1 || die "не найден ansible-playbook"
 command -v ssh >/dev/null 2>&1 || die "не найден ssh"
 command -v ssh-keyscan >/dev/null 2>&1 || die "не найден ssh-keyscan"
@@ -232,7 +255,7 @@ read -r -p "Начать настройку? [y/N]: " CONFIRM
 
 if [[ "$BOOTSTRAP_STEP" == "input_saved" ]]; then
   echo "[1/8] Подготавливаем сервер и создаём пользователей"
-  ANSIBLE_HOST_KEY_CHECKING=True ANSIBLE_SSH_ARGS="-o UserKnownHostsFile=$KNOWN_HOSTS_FILE -o StrictHostKeyChecking=yes" ansible-playbook \
+  run_ansible_with_retry \
     -i "$INVENTORY_FILE" \
     "$PROJECT_DIR/playbook_bootstrap_prepare.yaml" \
     -e "@$VARS_FILE"
@@ -242,7 +265,7 @@ fi
 
 if [[ "$BOOTSTRAP_STEP" == "prepare_done" ]]; then
   echo "[2/8] Проверяем SSH-вход под $PRIMARY_USER"
-  ssh -o BatchMode=yes -o ConnectTimeout=10 -o PasswordAuthentication=no \
+  ssh -o BatchMode=yes -o ConnectTimeout=10 -o ConnectionAttempts=3 -o PasswordAuthentication=no \
     -o UserKnownHostsFile="$KNOWN_HOSTS_FILE" -o StrictHostKeyChecking=yes \
     "$PRIMARY_USER@$SERVER_ADDRESS" true \
     || die "не удалось войти под $PRIMARY_USER. Проверьте, что соответствующий приватный ключ доступен ssh-agent или стандартному SSH-клиенту"
@@ -261,7 +284,7 @@ EOF
 
 if [[ "$BOOTSTRAP_STEP" == "admin_login_done" ]]; then
   echo "[3/8] Применяем SSH hardening, UFW и security-сервисы"
-  ANSIBLE_HOST_KEY_CHECKING=True ANSIBLE_SSH_ARGS="-o UserKnownHostsFile=$KNOWN_HOSTS_FILE -o StrictHostKeyChecking=yes" ansible-playbook \
+  run_ansible_with_retry \
     -i "$INVENTORY_FILE" \
     "$PROJECT_DIR/playbook_bootstrap_harden.yaml" \
     -e "@$VARS_FILE"
@@ -271,7 +294,7 @@ fi
 
 if [[ "$BOOTSTRAP_STEP" == "harden_done" ]]; then
   echo "[4/8] Проверяем доступ под $PRIMARY_USER после hardening"
-  ssh -o BatchMode=yes -o ConnectTimeout=10 -o PasswordAuthentication=no \
+  ssh -o BatchMode=yes -o ConnectTimeout=10 -o ConnectionAttempts=3 -o PasswordAuthentication=no \
     -o UserKnownHostsFile="$KNOWN_HOSTS_FILE" -o StrictHostKeyChecking=yes \
     "$PRIMARY_USER@$SERVER_ADDRESS" true \
     || die "SSH-проверка после hardening не прошла"
@@ -281,7 +304,7 @@ fi
 
 if [[ "$BOOTSTRAP_STEP" == "post_harden_verified" ]]; then
   echo "[5/8] Проверяем UFW"
-  ssh -o BatchMode=yes -o UserKnownHostsFile="$KNOWN_HOSTS_FILE" -o StrictHostKeyChecking=yes "$PRIMARY_USER@$SERVER_ADDRESS" \
+  ssh -o BatchMode=yes -o ConnectionAttempts=3 -o UserKnownHostsFile="$KNOWN_HOSTS_FILE" -o StrictHostKeyChecking=yes "$PRIMARY_USER@$SERVER_ADDRESS" \
     'sudo ufw status verbose'
   BOOTSTRAP_STEP="ufw_verified"
   save_input_state
@@ -289,7 +312,7 @@ fi
 
 if [[ "$BOOTSTRAP_STEP" == "ufw_verified" ]]; then
   echo "[6/8] Проверяем fail2ban и auditd"
-  ssh -o BatchMode=yes -o UserKnownHostsFile="$KNOWN_HOSTS_FILE" -o StrictHostKeyChecking=yes "$PRIMARY_USER@$SERVER_ADDRESS" \
+  ssh -o BatchMode=yes -o ConnectionAttempts=3 -o UserKnownHostsFile="$KNOWN_HOSTS_FILE" -o StrictHostKeyChecking=yes "$PRIMARY_USER@$SERVER_ADDRESS" \
     'systemctl is-active fail2ban; systemctl is-active auditd'
   BOOTSTRAP_STEP="security_verified"
   save_input_state

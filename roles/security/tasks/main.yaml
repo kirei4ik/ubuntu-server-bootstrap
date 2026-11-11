@@ -31,7 +31,6 @@
         backup: no
       with_items:
         - { regexp: 'Port\s+', line: 'Port {{ security.ssh.port }}' }
-        - { regexp: 'Protocol\s+', line: 'Protocol {{ security.ssh.protocol }}' }
         - { regexp: 'PermitRootLogin\s+', line: 'PermitRootLogin {{ "no" if security_stage == "activate" and security.ssh.disable_root else "yes" }}' }
         - { regexp: 'PasswordAuthentication\s+', line: 'PasswordAuthentication {{ "yes" if security_stage == "prepare" else ("yes" if security.ssh.password_auth else "no") }}' }
         - { regexp: 'PubkeyAuthentication\s+', line: 'PubkeyAuthentication yes' }
@@ -200,25 +199,7 @@
       with_items: "{{ bootstrap_firewall_rules | default(security.firewall.rules) }}"
       notify: Reload UFW
 
-    - name: Настроить rate limiting для SSH
-      ufw:
-        rule: limit
-        port: "{{ security.firewall.rate_limit.port }}"
-        proto: "{{ security.firewall.rate_limit.proto }}"
-      when: security.firewall.rate_limit.enabled
-      notify: Reload UFW
-
-    - name: Запретить подключения к порту 23 (telnet)
-      ufw:
-        rule: deny
-        port: '23'
-        proto: tcp
-      notify: Reload UFW
-
-    - name: Включить UFW
-      ufw:
-        state: enabled
-      when: security_stage == 'activate'
+  when: security.firewall.enabled | bool
   tags:
     - ufw
     - firewall
@@ -270,6 +251,7 @@
         state: started
         daemon_reload: yes
       when: security_stage == 'activate'
+  when: security.fail2ban.enabled | bool
   tags:
     - fail2ban
     - security
@@ -299,17 +281,29 @@
       command: update-grub
       when: false  # Запускать вручную или через handler
 
+    - name: Проверить профили AppArmor
+      stat:
+        path: "/etc/apparmor.d/{{ item }}"
+      loop: "{{ security.apparmor.profiles }}"
+      register: apparmor_profile_files
+
     - name: Включить профили AppArmor
-      command: "aa-enforce /etc/apparmor.d/{{ item }}"
-      with_items: "{{ security.apparmor.profiles }}"
-      ignore_errors: yes
-      when: security.apparmor.mode == 'enforce'
+      command: "aa-enforce /etc/apparmor.d/{{ item.item }}"
+      loop: "{{ apparmor_profile_files.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when:
+        - security.apparmor.mode == 'enforce'
+        - item.stat.exists
 
     - name: Включить complain mode
-      command: "aa-complain /etc/apparmor.d/{{ item }}"
-      with_items: "{{ security.apparmor.profiles }}"
-      ignore_errors: yes
-      when: security.apparmor.mode == 'complain'
+      command: "aa-complain /etc/apparmor.d/{{ item.item }}"
+      loop: "{{ apparmor_profile_files.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when:
+        - security.apparmor.mode == 'complain'
+        - item.stat.exists
 
     - name: Проверить статус AppArmor
       command: aa-status
@@ -321,6 +315,7 @@
       debug:
         var: apparmor_status.stdout_lines
       when: apparmor_status.rc == 0
+  when: security.apparmor.enabled | bool
   tags:
     - apparmor
     - security
@@ -365,6 +360,7 @@
         state: started
         daemon_reload: yes
       when: security_stage == 'activate'
+  when: security.auditd.enabled | bool
   tags:
     - auditd
     - security
@@ -439,6 +435,31 @@
     - hardening
     - security
     - sysctl
+
+- name: ====== АКТИВАЦИЯ ФАЕРВОЛА (UFW) ======
+  block:
+    - name: Настроить rate limiting для SSH
+      ufw:
+        rule: limit
+        port: "{{ security.firewall.rate_limit.port }}"
+        proto: "{{ security.firewall.rate_limit.proto }}"
+      when: security.firewall.rate_limit.enabled | bool
+
+    - name: Запретить подключения к порту 23 (telnet)
+      ufw:
+        rule: deny
+        port: '23'
+        proto: tcp
+
+    - name: Включить UFW
+      ufw:
+        state: enabled
+      when: security_stage == 'activate'
+  when: security.firewall.enabled | bool
+  tags:
+    - ufw
+    - firewall
+    - security
 
 - name: ====== ПРОВЕРКА БЕЗОПАСНОСТИ ======
   block:

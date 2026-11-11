@@ -14,9 +14,6 @@ security:
     password_auth: false
     permit_empty_passwords: false
     
-    # Настройки протокола
-    protocol: 2
-    
     # Криптография (современные алгоритмы 2026)
     kex_algorithms: "curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group-exchange-sha256"
     ciphers: "chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr"
@@ -169,29 +166,12 @@ security:
       - "-w /etc/shadow -p wa -k identity"
       - "-w /etc/group -p wa -k identity"
       - "-w /etc/gshadow -p wa -k identity"
-      - "-w /etc/sudoers -p wa -k sudoers"
-      - "-w /etc/sudoers.d/ -p wa -k sudoers"
-      
-      # Изменение SSH
-      - "-w /etc/ssh/ -p wa -k ssh"
-      - "-w /etc/ssh/sshd_config -p wa -k ssh"
-      
-      # Модификация системы
-      - "-w /etc/pam.d/ -p wa -k pam"
-      - "-w /etc/security/ -p wa -k pam"
-      
       # Административный доступ
       - "-w /root -p wa -k root_access"
-      - "-w /tmp -p x -k tmp_execution"
-      - "-w /var/tmp -p x -k tmp_execution"
       
       # Логи аутентификации
       - "-w /var/log/auth.log -p wa -k authentication"
       - "-w /var/log/lastlog -p wa -k logins"
-      
-      # Изменение AppArmor
-      - "-w /etc/apparmor/ -p wa -k apparmor"
-      - "-w /etc/apparmor.d/ -p wa -k apparmor"
       
       # Системные вызовы
       - "-a always,exit -F arch=b64 -S setuid -S setgid -S setreuid -S setregid -k privilege_escalation"

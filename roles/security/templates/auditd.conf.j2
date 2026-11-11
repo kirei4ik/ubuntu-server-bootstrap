@@ -48,7 +48,7 @@ disk_full_action = {{ security.auditd.disk_full_action }}
 disk_error_action = {{ security.auditd.disk_error_action }}
 
 # Использовать TCP wrappers
-use_libwrap = {{ "true" if security.auditd.use_libwrap else "false" }}
+use_libwrap = {{ "yes" if security.auditd.use_libwrap else "no" }}
 
 # Настройки TCP сервера
 tcp_listen_queue = {{ security.auditd.tcp_listen_queue }}
@@ -56,7 +56,7 @@ tcp_max_per_addr = {{ security.auditd.tcp_max_per_addr }}
 tcp_client_max_idle = {{ security.auditd.tcp_client_max_idle }}
 
 # Kerberos настройки
-enable_krb5 = {{ "true" if security.auditd.enable_krb5 else "false" }}
+enable_krb5 = {{ "yes" if security.auditd.enable_krb5 else "no" }}
 krb5_principal = {{ security.auditd.krb5_principal }}
 
 # Дополнительные настройки
@@ -66,9 +66,6 @@ overflow_action = SYSLOG
 max_restarts = 10
 plugin_dir = /etc/audit/plugins.d
 end_of_event_timeout = 2
-
-# Настройки взаимодействия с syslog
-syslog_format = ENHANCED
 
 # Настройки записи
 write_logs = yes

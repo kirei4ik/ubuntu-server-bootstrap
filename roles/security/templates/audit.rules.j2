@@ -69,7 +69,9 @@
 
 # Мониторинг SSH ключей
 -w /etc/ssh/ -p wa -k ssh_changes
--w /home/*/.ssh/ -p wa -k ssh_user_keys
+{% for user in bootstrap_users | default([]) %}
+-w /home/{{ user.name }}/.ssh/ -p wa -k ssh_user_keys
+{% endfor %}
 -w /root/.ssh/ -p wa -k ssh_root_keys
 
 # Мониторинг AppArmor
